@@ -1,0 +1,259 @@
+# Builds the Linux packages and publishes them to the `dev` release.
+#
+# Springen is not a Tauri app, so there is no bundler to call: the AppDir, the
+# AppImage and the .deb are assembled here from the `springen-app` binary.
+#
+# This workflow only ever adds assets. It never edits the release title or
+# notes - release.yml owns those, and two workflows rewriting the same release
+# would undo each other on every push.
+name: Linux release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "assets/**"
+      - "packaging/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/linux-release.yml"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # The runners have no GPU, so the smoke run below goes through llvmpipe.
+  LIBGL_ALWAYS_SOFTWARE: 1
+
+jobs:
+  linux:
+    # 22.04 rather than latest so the binary links against an older glibc and
+    # runs on more than the newest distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # icoutils extracts the icon, desktop-file-utils validates the launcher
+      # entry, dpkg-dev provides dpkg-shlibdeps. The rest is what the app needs
+      # to open a window in the smoke run: X11, xkbcommon and a software GL
+      # driver. libxkbcommon-x11-0 is the one that is not obvious - without it
+      # the app aborts at startup with "Library libxkbcommon-x11.so could not
+      # be loaded".
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            icoutils \
+            desktop-file-utils \
+            dpkg-dev \
+            xvfb \
+            libgl1-mesa-dri \
+            libxkbcommon-x11-0 \
+            libxcursor1 \
+            libxrandr2 \
+            libxi6
+
+      # Read out of release.yml rather than repeated here. Both workflows put
+      # assets on the same `dev` release, and two hand-bumped copies of the
+      # number would eventually disagree about what that release holds.
+      - name: Read the version
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's/^[[:space:]]*SPRINGEN_VERSION:[[:space:]]*//p' \
+            .github/workflows/release.yml | head -1 | tr -d '"\r')
+          test -n "$v"
+          echo "SPRINGEN_VERSION=$v" >> "$GITHUB_ENV"
+          echo "Building $v"
+
+      - name: Build
+        run: cargo build --release -p springen-app
+
+      - name: Assemble the AppDir
+        run: |
+          set -euo pipefail
+
+          # The only icon in the tree is the Windows .ico, so the largest frame
+          # in it becomes the Linux icon.
+          rm -rf icon && mkdir -p icon
+          icotool -x -o icon packaging/windows/springen.ico
+          largest=$(ls -S icon/*.png | head -1)
+          test -n "$largest"
+          echo "icon: $largest"
+
+          rm -rf AppDir
+          mkdir -p AppDir/usr/bin \
+                   AppDir/usr/share/applications \
+                   AppDir/usr/share/icons/hicolor/256x256/apps \
+                   AppDir/usr/share/doc/springen
+
+          cp target/release/springen-app AppDir/usr/bin/springen-app
+          strip AppDir/usr/bin/springen-app
+          cp "$largest" AppDir/usr/share/icons/hicolor/256x256/apps/springen.png
+          cp LICENSE AppDir/usr/share/doc/springen/copyright
+
+          cat > AppDir/usr/share/applications/springen.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Springen
+          Comment=Node based map generator for Zero-K
+          Exec=springen-app
+          Icon=springen
+          Terminal=false
+          Categories=Graphics;
+          EOF
+          desktop-file-validate AppDir/usr/share/applications/springen.desktop
+
+          # appimagetool wants the desktop entry and the icon at the AppDir
+          # root as well, named to match the entry's Icon= key.
+          cp AppDir/usr/share/applications/springen.desktop AppDir/springen.desktop
+          cp "$largest" AppDir/springen.png
+
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE=$(dirname "$(readlink -f "$0")")
+          exec "$HERE/usr/bin/springen-app" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+      - name: Build the .deb
+        run: |
+          set -euo pipefail
+          mkdir -p linux
+          rm -rf pkg && mkdir -p pkg/DEBIAN
+          cp -r AppDir/usr pkg/usr
+
+          # What the binary actually links against, read off the ELF rather
+          # than written down here.
+          mkdir -p debian
+          printf 'Source: springen\n\nPackage: springen\nArchitecture: amd64\n' > debian/control
+          linked=$(dpkg-shlibdeps -O --ignore-missing-info pkg/usr/bin/springen-app \
+            | sed -n 's/^shlibs:Depends=//p') || true
+          rm -rf debian
+          if [ -z "$linked" ]; then
+            echo "::warning::dpkg-shlibdeps found nothing; falling back to libc6"
+            linked="libc6"
+          fi
+          echo "linked: $linked"
+
+          # winit, glutin and xkbcommon all dlopen their libraries, so none of
+          # these are in the ELF and shlibdeps cannot see them. X11 goes in
+          # Depends and Wayland in Recommends because winit falls back to X11
+          # when Wayland is missing, not the other way round. rfd is built with
+          # xdg-portal only, so there is no GTK here - the file dialog is a
+          # D-Bus call to a portal, which is a service rather than a library.
+          dlopened="libgl1, libx11-6, libxcursor1, libxrandr2, libxi6, libxkbcommon0, libxkbcommon-x11-0"
+
+          size=$(du -ks pkg/usr | cut -f1)
+          cat > pkg/DEBIAN/control <<EOF
+          Package: springen
+          Version: $SPRINGEN_VERSION
+          Section: graphics
+          Priority: optional
+          Architecture: amd64
+          Maintainer: QrowZK <QrowZK@users.noreply.github.com>
+          Installed-Size: $size
+          Depends: $linked, $dlopened
+          Recommends: libwayland-client0, libwayland-cursor0, libwayland-egl1, libegl1, xdg-desktop-portal
+          Homepage: https://github.com/QrowZK/springen
+          Description: Node based map generator for Zero-K
+           Springen designs maps from a node graph and bakes them to .sd7 or
+           .sdd archives.
+          EOF
+          cat pkg/DEBIAN/control
+
+          dpkg-deb --build --root-owner-group pkg \
+            "linux/Springen_${SPRINGEN_VERSION}_amd64.deb"
+
+      - name: Build the AppImage
+        run: |
+          set -euo pipefail
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          # The runners have no FUSE, so both appimagetool and the AppImage it
+          # produces have to unpack themselves rather than mount.
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool \
+            --no-appstream AppDir "linux/Springen_${SPRINGEN_VERSION}_amd64.AppImage"
+
+      # Unlike the Tauri apps in this family, this one can be run here, so it
+      # is. This is what catches a Depends line that does not cover what the
+      # binary dlopens at startup.
+      - name: The packages run
+        run: |
+          set -euo pipefail
+          mkdir -p shots
+
+          sudo apt-get install -y "./linux/Springen_${SPRINGEN_VERSION}_amd64.deb"
+          xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+            springen-app --screen splash --screenshot shots/deb.png
+          test -s shots/deb.png
+
+          chmod +x "linux/Springen_${SPRINGEN_VERSION}_amd64.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+            "./linux/Springen_${SPRINGEN_VERSION}_amd64.AppImage" \
+            --screen splash --screenshot shots/appimage.png
+          test -s shots/appimage.png
+
+      - name: Hash the packages
+        run: |
+          set -euo pipefail
+          cd linux
+          for f in *.deb *.AppImage; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -l
+          cat *.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: springen-linux
+          path: linux/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd linux
+          mapfile -t assets < <(ls -1 *.deb *.AppImage *.sha256)
+          test "${#assets[@]}" -gt 0
+
+          # Uploaded, never swept. Deleting before uploading is what turns a
+          # published download into a 404, and there is nothing here that the
+          # newer packages replace by name anyway.
+          #
+          # NOTE: release.yml does sweep, and its keep list is only the Windows
+          # zip and its hash - so its next run removes these packages. That has
+          # to be fixed there, not here.
+          if gh release view dev >/dev/null 2>&1; then
+            gh release upload dev "${assets[@]}" --clobber
+          else
+            # Only reached if Linux publishes before Windows ever has. The
+            # title matches release.yml so the release does not get renamed
+            # underneath it on the next push.
+            notes=$(cat <<'EOF'
+          Rolling development build of Springen, from commit ${{ github.sha }}.
+
+          The .deb installs springen-app; the .AppImage runs from anywhere once
+          it is marked executable.
+
+          The .sha256 beside each file is the hash to check it against.
+          EOF
+            )
+            gh release create dev "${assets[@]}" \
+              --title "Springen - development build" \
+              --notes "$notes" \
+              --prerelease \
+              --target "${{ github.sha }}"
+          fi
+          echo "Published $SPRINGEN_VERSION"

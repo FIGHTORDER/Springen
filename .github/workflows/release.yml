@@ -97,16 +97,9 @@ jobs:
             gh release edit dev --title "Springen - development build" --notes $notes --prerelease
             if ($LASTEXITCODE -ne 0) { throw "could not update the dev release" }
 
-            # The filename carries the version, so yesterday's zip does not get
-            # overwritten - it just sits there looking current.
-            $keep = $assets | ForEach-Object { Split-Path $_ -Leaf }
-            foreach ($old in (gh release view dev --json assets --jq '.assets[].name')) {
-              if ($old -and $keep -notcontains $old) {
-                "Removing stale asset $old"
-                gh release delete-asset dev $old --yes
-                if ($LASTEXITCODE -ne 0) { throw "could not remove $old" }
-              }
-            }
+            # Nothing is deleted here. Other workflows publish to this same
+            # release, and Shiro's catalogue pins asset URLs and hashes, so an
+            # asset this run did not produce is not this run's to remove.
             gh release upload dev $assets --clobber
             if ($LASTEXITCODE -ne 0) { throw "could not upload the assets" }
           } else {
