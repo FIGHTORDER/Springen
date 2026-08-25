@@ -1,0 +1,335 @@
+{
+ "project": {
+  "name": "Golden",
+  "unitsX": 12,
+  "unitsY": 12,
+  "seed": 20250815,
+  "minHeight": -80,
+  "maxHeight": 420,
+  "mexSym": "rot180",
+  "extractorRadius": 100,
+  "maxMetal": 1.7
+ },
+ "files": {
+  "ridge_height_65.f32": {
+   "bytes": 16900,
+   "sha256": "2ed9af301ce02d9bf534d8da7eae34bb8758e1885c06c4e234017461ae3cfaec"
+  },
+  "ridge_metal_65.f32": {
+   "bytes": 16900,
+   "sha256": "5bf0a2c87eda162faa9168727e2f9b49680318b7c556eedeba9521f20db4cd1c"
+  },
+  "ridge_height_129.f32": {
+   "bytes": 66564,
+   "sha256": "6b53ed180b36a6a4efe61543baefb227220b9f98206a49de5118d569cd4323d6"
+  },
+  "ridge_metal_129.f32": {
+   "bytes": 66564,
+   "sha256": "2cb4073767b4a45f262ee881c4fd3bc48657f3f1a0abb1cdeb82d7c0bad6bae7"
+  },
+  "ridge_height_257.f32": {
+   "bytes": 264196,
+   "sha256": "dde46ad8e6bd979ac10d89246e1fb1c1ac21dcf94201fb75c3b226935e7a8c58"
+  },
+  "ridge_metal_257.f32": {
+   "bytes": 264196,
+   "sha256": "9c3c8cc4838dec2aaa67d3320ce3940070007c650d3c37afced2d013f8ed0e93"
+  },
+  "islands_height_65.f32": {
+   "bytes": 16900,
+   "sha256": "b003c426a1c70e292947624eeb6557b8e81ca613a1ef41148c3b4d71245de4be"
+  },
+  "islands_metal_65.f32": {
+   "bytes": 16900,
+   "sha256": "cfac3215ed63b9094067187a3e41b0e9a343bfe5b4367e1ce420c57f88390b08"
+  },
+  "islands_height_129.f32": {
+   "bytes": 66564,
+   "sha256": "d9ab7d700d7645ccc1c119d3036633353a28b5efb2e975ec3738d4e5584b6ae5"
+  },
+  "islands_metal_129.f32": {
+   "bytes": 66564,
+   "sha256": "6da0932fe9e52573db87451147424c76444718f87701ba99846c94b508d4a2f2"
+  },
+  "islands_height_257.f32": {
+   "bytes": 264196,
+   "sha256": "e8163245c9892697b4f3b7327ddd6811408b6ae140fec26889d7556f73680ead"
+  },
+  "islands_metal_257.f32": {
+   "bytes": 264196,
+   "sha256": "8ea5026ce4c8ce3a82358b03a0029083feaf28cf44deab96d11e2ec840fe2809"
+  },
+  "textured_height_65.f32": {
+   "bytes": 16900,
+   "sha256": "31d28daaaa36a0032a4a3ec213cc3072846e77fcf46c1a6c2fe6b84b5f881314"
+  },
+  "textured_metal_65.f32": {
+   "bytes": 16900,
+   "sha256": "d05cbf339676745e21f4509138d317524f3dcf93fbd95e584c052665285fc421"
+  },
+  "textured_type_65.f32": {
+   "bytes": 16900,
+   "sha256": "2e958619c89959b5964e0024d493189f726f25c062b719ed7f97b4d95898ff75"
+  },
+  "textured_diffuse_65.f32": {
+   "bytes": 50700,
+   "sha256": "898afd858b4d35ca7e08d9bee6f0ce5d155888e85dbac56099d11a36d888f5b5"
+  },
+  "textured_grass_65.f32": {
+   "bytes": 16900,
+   "sha256": "dd0010f8dfe42439c4325956462596c294eac4e848d69e53dce75c30a6c38fe4"
+  },
+  "textured_splat_65.f32": {
+   "bytes": 50700,
+   "sha256": "7f40acc22ec19698de0853f189af530bb602792f234b772abe564021a4eddb00"
+  },
+  "textured_height_129.f32": {
+   "bytes": 66564,
+   "sha256": "dd286b97b853bdc06674ba32ef4d0346bcc819d4999bf095d2f7d06a7223165a"
+  },
+  "textured_metal_129.f32": {
+   "bytes": 66564,
+   "sha256": "15ca8bb9490b28a84e7b0c3069c8b990d28f2b06a662e6b754632f6fc4c33009"
+  },
+  "textured_type_129.f32": {
+   "bytes": 66564,
+   "sha256": "301a347716955b7fbed46b867a5c43914c8fc83497fee881294f6fb54244d187"
+  },
+  "textured_diffuse_129.f32": {
+   "bytes": 199692,
+   "sha256": "c3b3e39c07e1d1a93675b9cfe37acadeed67baf9a750e1d151ae7b655a0770cd"
+  },
+  "textured_grass_129.f32": {
+   "bytes": 66564,
+   "sha256": "e211df0daa7d8638d7a0563f8e3e624fa4992a5b507b668142dd0e56dc7d03be"
+  },
+  "textured_splat_129.f32": {
+   "bytes": 199692,
+   "sha256": "f49bcc91d17165b77e65defe6074ee6db75431edb1a4295b6a53d031c78a1850"
+  },
+  "textured_height_257.f32": {
+   "bytes": 264196,
+   "sha256": "f167edec202b4e475468def2c4ebc84da4961c1a94945a8455b9ab48325393ae"
+  },
+  "textured_metal_257.f32": {
+   "bytes": 264196,
+   "sha256": "a87054e0f776243141aa463c9de90b619ce488782432f66d1f5f0b656078c897"
+  },
+  "textured_type_257.f32": {
+   "bytes": 264196,
+   "sha256": "8f5a532b3c19bda88d86484857c7c48978271534d114495ff9c369a708b7bda2"
+  },
+  "textured_diffuse_257.f32": {
+   "bytes": 792588,
+   "sha256": "0167363c74db79d89ea8096b78889717c5f6bfd0c6f44a656f128f2d258f6bca"
+  },
+  "textured_grass_257.f32": {
+   "bytes": 264196,
+   "sha256": "6b584ce423c7efb91c6d9d9391fef4bea0ccc2e176aac9d486a46b8b82031ba7"
+  },
+  "textured_splat_257.f32": {
+   "bytes": 792588,
+   "sha256": "6708f176e8e41b7008058c1dc4593eac153223052270070ae0646209e4b28841"
+  },
+  "bake_height_769_16bit.png": {
+   "bytes": 1183649,
+   "sha256": "e2471a1e04465e4d690b303afee13957655333cd14cdf1a769090bb198aa5700"
+  },
+  "bake_type_384_indices.png": {
+   "bytes": 147918,
+   "sha256": "38fd9444e1544658dc3933888b8fb5998903ef11fe24bd4a900e5ae93a9ee1bf"
+  },
+  "bake_metal_384.png": {
+   "bytes": 147918,
+   "sha256": "837b08d3e16b891ed1e2d4526702aee164501055cc2180224436e1e4960be116"
+  }
+ },
+ "scalars": {
+  "ridge_height_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0.13591332733631134,
+   "max": 0.8980947136878967
+  },
+  "ridge_metal_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "ridge_height_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0.1210188940167427,
+   "max": 0.8980947136878967
+  },
+  "ridge_metal_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "ridge_height_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0.11491657048463821,
+   "max": 0.8980947136878967
+  },
+  "ridge_metal_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "islands_height_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 0.49517396092414856
+  },
+  "islands_metal_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "islands_height_129": {
+   "res": 129,
+   "ch": 1,
+   "min": -0.0006300891400314867,
+   "max": 0.5048020482063293
+  },
+  "islands_metal_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "islands_height_257": {
+   "res": 257,
+   "ch": 1,
+   "min": -0.00008057688683038577,
+   "max": 0.5083751678466797
+  },
+  "islands_metal_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_height_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0.15024757385253906,
+   "max": 0.898196280002594
+  },
+  "textured_metal_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_type_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_diffuse_65": {
+   "res": 65,
+   "ch": 3,
+   "min": 0.2548472285270691,
+   "max": 0.8840607404708862
+  },
+  "textured_grass_65": {
+   "res": 65,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_splat_65": {
+   "res": 65,
+   "ch": 3,
+   "min": 0,
+   "max": 0.5870000123977661
+  },
+  "textured_height_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0.12895295023918152,
+   "max": 0.898196280002594
+  },
+  "textured_metal_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_type_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_diffuse_129": {
+   "res": 129,
+   "ch": 3,
+   "min": 0.23550476133823395,
+   "max": 0.889064610004425
+  },
+  "textured_grass_129": {
+   "res": 129,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_splat_129": {
+   "res": 129,
+   "ch": 3,
+   "min": 0,
+   "max": 0.5870000123977661
+  },
+  "textured_height_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0.12380414456129074,
+   "max": 0.898196280002594
+  },
+  "textured_metal_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_type_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_diffuse_257": {
+   "res": 257,
+   "ch": 3,
+   "min": 0.22319571673870087,
+   "max": 0.9037079215049744
+  },
+  "textured_grass_257": {
+   "res": 257,
+   "ch": 1,
+   "min": 0,
+   "max": 1
+  },
+  "textured_splat_257": {
+   "res": 257,
+   "ch": 3,
+   "min": 0,
+   "max": 0.5870000123977661
+  },
+  "spots": {
+   "n": 14,
+   "validation": [],
+   "symmetric": true
+  },
+  "metalBlobs": 14
+ }
+}

@@ -1,0 +1,12 @@
+:root{
+  --shadow-node:0 6px 18px rgba(0,0,0,.45);
+  --shadow-panel:0 2px 12px rgba(0,0,0,.35);
+  --shadow-popover:0 8px 24px rgba(0,0,0,.55);
+  --shadow-dialog:0 24px 64px rgba(0,0,0,.62);
+  --inset-top:inset 0 1px 0 rgba(255,255,255,.035);
+  --inset-well:inset 0 1px 2px rgba(0,0,0,.45);
+  --ring-focus:0 0 0 1px var(--contour-500);
+  --ring-selected:inset 2px 0 0 var(--contour-500);
+  --grid-minor:rgba(48,56,64,.5); /* @kind color */
+  --grid-major:rgba(62,72,82,.65); /* @kind color */
+}

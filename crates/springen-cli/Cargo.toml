@@ -1,0 +1,23 @@
+[package]
+name = "springen-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Headless map baking for Springen"
+
+[[bin]]
+name = "springen"
+path = "src/main.rs"
+
+[dependencies]
+springen-core = { workspace = true }
+springen-smf = { workspace = true }
+springen-archive = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+
+# Host-side, not target-gated: build scripts compile for the host, so a
+# cross-build from Linux still needs this present.
+[build-dependencies]
+winresource = "0.1"

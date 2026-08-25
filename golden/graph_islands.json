@@ -1,0 +1,130 @@
+{
+ "version": 1,
+ "nextId": 10,
+ "nodes": [
+  {
+   "id": "n1",
+   "type": "noise",
+   "x": 40,
+   "y": 60,
+   "params": {
+    "feature": 2600,
+    "octaves": 7,
+    "gain": 0.5,
+    "lacunarity": 2,
+    "seed": 0
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n2",
+   "type": "radial",
+   "x": 40,
+   "y": 250,
+   "params": {
+    "cx": 0.5,
+    "cy": 0.5,
+    "radius": 4200,
+    "falloff": 1.1,
+    "invert": false
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n3",
+   "type": "mix",
+   "x": 300,
+   "y": 130,
+   "params": {
+    "mode": "multiply",
+    "amount": 1
+   },
+   "inputs": {
+    "A": "n1",
+    "B": "n2"
+   }
+  },
+  {
+   "id": "n4",
+   "type": "warp",
+   "x": 540,
+   "y": 130,
+   "params": {
+    "strength": 700,
+    "feature": 2200,
+    "seed": 17
+   },
+   "inputs": {
+    "In": "n3"
+   }
+  },
+  {
+   "id": "n5",
+   "type": "symmetry",
+   "x": 780,
+   "y": 130,
+   "params": {
+    "mode": "mirrorX",
+    "blend": 1
+   },
+   "inputs": {
+    "In": "n4"
+   }
+  },
+  {
+   "id": "n6",
+   "type": "hydraulic",
+   "x": 1020,
+   "y": 130,
+   "params": {
+    "density": 0.7,
+    "inertia": 0.05,
+    "capacity": 4,
+    "erode": 0.3,
+    "deposit": 0.3,
+    "evaporate": 0.02,
+    "radius": 96,
+    "lifetime": 48
+   },
+   "inputs": {
+    "In": "n5"
+   }
+  },
+  {
+   "id": "n7",
+   "type": "out_height",
+   "x": 1260,
+   "y": 130,
+   "params": {},
+   "inputs": {
+    "In": "n6"
+   }
+  },
+  {
+   "id": "n8",
+   "type": "slopemask",
+   "x": 1020,
+   "y": 340,
+   "params": {
+    "minDeg": 4,
+    "maxDeg": 22,
+    "falloff": 8
+   },
+   "inputs": {
+    "In": "n6"
+   }
+  },
+  {
+   "id": "n9",
+   "type": "out_metal",
+   "x": 1260,
+   "y": 340,
+   "params": {
+    "gain": 1
+   },
+   "inputs": {
+    "In": "n8"
+   }
+  }
+ ]
+}

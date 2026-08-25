@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The golden suite is the whole point: it must pass on every target, or
+  # determinism is not a property we actually have.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --workspace
+      - name: Test
+        run: cargo test --release --workspace
+
+  # The declared MSRV is a promise, and an unchecked promise is a wrong one:
+  # `rust-version` said 1.82 for a tree that has never built below 1.95.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from the workspace manifest
+        id: msrv
+        run: |
+          v=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --release --workspace --all-targets -- -D warnings
+
+  # Bake a real map and check it with tools that are not ours.
+  bake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pip install py7zr pillow
+      - run: cargo build --release -p springen-cli
+      - name: Bake to .sd7 and .sdd
+        run: |
+          ./target/release/springen bake --name "CI Map" --size 8x8 --out out/CIMap.sd7
+          ./target/release/springen bake --name "CI Map" --size 8x8 --out out/CIMap.sdd
+      - name: SMF conformance
+        run: |
+          python3 tools/read_smf.py out/CIMap.sdd/maps/cimap.smf | tee smf.txt
+          ! grep -q FAIL smf.txt
+      - name: Archive is non-solid and matches the folder
+        run: |
+          python3 - <<'PY'
+          import py7zr, hashlib, os
+          with py7zr.SevenZipFile("out/CIMap.sd7") as a:
+              n_files = len(a.list())
+              folders = a.header.main_streams.unpackinfo.numfolders
+              a.extractall(path="x7")
+          assert folders == n_files, f"archive is solid: {folders} folders for {n_files} files"
+          for root, _, fs in os.walk("x7"):
+              for f in fs:
+                  p = os.path.join(root, f)
+                  rel = os.path.relpath(p, "x7")
+                  d = os.path.join("out/CIMap.sdd", rel)
+                  assert open(p, "rb").read() == open(d, "rb").read(), rel
+          print(n_files, "entries verified")
+          PY
+      - name: Preview every view mode without baking
+        run: |
+          for v in Relief Diffuse Metal Type Slope Pathability; do
+            ./target/release/springen preview --size 8x8 --view $v --res 256 \
+              --out shots/preview-$v.png
+          done
+          python3 -c "
+          from PIL import Image
+          import sys
+          for v in ['Relief','Diffuse','Metal','Type','Slope','Pathability']:
+              im = Image.open('shots/preview-%s.png' % v)
+              assert im.size == (256, 256), (v, im.size)
+              assert len(im.getcolors(1 << 20) or []) > 1, v + ' came out flat'
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: map
+          path: out/CIMap.sd7
+
+  # The interface renders through a software rasteriser, so it can be checked
+  # on a runner with no GPU.
+  app:
+    runs-on: ubuntu-latest
+    env:
+      LIBGL_ALWAYS_SOFTWARE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install a display and a software GL driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libxkbcommon-x11-0 \
+            libxcursor1 libxrandr2 libxi6
+        # libxkbcommon-x11-0 is the one that is not obvious: without it the
+        # app aborts at startup with "Library libxkbcommon-x11.so could not be
+        # loaded", which reads like a bug in the app rather than a missing
+        # package.
+      - run: cargo build --release -p springen-app
+      - name: Screenshot every screen
+        run: |
+          for s in splash projects workspace; do
+            xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+              ./target/release/springen-app --screen $s --screenshot shots/$s.png
+          done
+      - name: Screenshot every 3D view mode
+        run: |
+          for v in Relief Diffuse Metal Type Slope Pathability; do
+            xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+              ./target/release/springen-app --screen terrain --view $v \
+              --screenshot shots/3d-$v.png
+          done
+      - name: Bake from the interactive path
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x800x24" \
+            ./target/release/springen-app --starter ridge --smoke out/Smoke.sd7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/
+
+  # Cross-build the Windows binaries, installer and portable zip from Linux, so
+  # the release artifacts come out of one reproducible job.
+  windows-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y mingw-w64 nsis zip bc
+      - run: packaging/windows/build.sh ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/
+
+  # Run the installer on real Windows: install, use it, uninstall, and check it
+  # left nothing behind. This is the part that cannot be checked from Linux --
+  # NSIS installers are 32-bit, and Wine there may have no 32-bit support.
+  windows-verify:
+    needs: windows-package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: dist
+      - name: Install silently
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\*setup.exe)[0].FullName
+          Start-Process -FilePath $setup -ArgumentList "/S" -Wait
+          $dir = "$env:ProgramFiles\Springen"
+          foreach ($f in "springen.exe", "springen-app.exe", "README.txt", "LICENSE.txt", "uninstall.exe") {
+            if (-not (Test-Path "$dir\$f")) { throw "missing $f" }
+          }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Springen")) {
+            throw "no Start Menu folder"
+          }
+      - name: The installed tool works
+        shell: pwsh
+        run: |
+          $exe = "$env:ProgramFiles\Springen\springen.exe"
+          & $exe size 12x12
+          & $exe bake --name "CI Windows" --size 8x8 --out "$env:TEMP\ci.sd7"
+          if (-not (Test-Path "$env:TEMP\ci.sd7")) { throw "no archive produced" }
+      - name: It appears in Add/Remove Programs
+        shell: pwsh
+        run: |
+          $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Springen"
+          $p = Get-ItemProperty $key
+          if (-not $p.DisplayName) { throw "no DisplayName" }
+          Write-Host "$($p.DisplayName) $($p.DisplayVersion)"
+      - name: Uninstall cleanly
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "$env:ProgramFiles\Springen\uninstall.exe" -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path "$env:ProgramFiles\Springen\springen-app.exe") { throw "files left behind" }
+          if (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Springen") {
+            throw "registry entry left behind"
+          }

@@ -1,0 +1,11 @@
+[package]
+name = "springen-smf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SMF/SMT reader and writer, BC1 encoding and minimap generation for Spring/Recoil maps"
+
+[dependencies]
+rayon.workspace = true
+springen-core = { workspace = true }

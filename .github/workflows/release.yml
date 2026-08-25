@@ -1,0 +1,120 @@
+# Publishes a Windows build of the desktop app to the `dev` release.
+#
+# Springen has had no releases, which means there has been no way to hand
+# somebody a build: `cargo run` is the only route, and that needs a Rust
+# toolchain. This is the smallest thing that changes that.
+#
+# The `dev` tag is a rolling prerelease rather than a version: its assets are
+# replaced on every push to main, so the download URL is stable and always the
+# newest build. Cutting real versioned releases later means adding a tag
+# trigger, not rewriting this.
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Only ever increases for this workflow, which is the property a "is this
+  # newer" check needs.
+  # Bumped by hand. `github.run_number` cannot be reset, and it counts runs of
+  # this workflow rather than releases of this app - so it neither starts where
+  # a version should nor stops where one would.
+  SPRINGEN_VERSION: 1.0.0
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the desktop app
+        run: cargo build --release -p springen-app
+
+      # A zip rather than a bare .exe: it is what an installer-less download
+      # should be, and it leaves room for the assets and licence to travel with
+      # the binary without changing anything downstream.
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "dist"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item "target/release/springen-app.exe" $out
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" $out }
+          if (Test-Path "README.md") { Copy-Item "README.md" $out }
+          $zip = "Springen_${env:SPRINGEN_VERSION}_x64.zip"
+          Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
+
+          # The hash is published beside the zip because whoever installs this
+          # should be able to check it without trusting the download - Shiro's
+          # app launcher pins exactly this value and refuses a mismatch.
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Set-Content "$zip.sha256" -Encoding utf8
+          "SPRINGEN_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "sha256: $hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: springen-windows
+          path: |
+            Springen_*.zip
+            Springen_*.zip.sha256
+          if-no-files-found: error
+
+      # Updated in place rather than deleted and recreated: a delete that fails
+      # leaves a create that cannot succeed, and there is never a moment when
+      # the download link people have does not exist.
+      - name: Publish
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @($env:SPRINGEN_ZIP, "$($env:SPRINGEN_ZIP).sha256")
+          $notes = @"
+          Rolling development build of Springen, from commit ${{ github.sha }}.
+
+          Unpack and run springen-app.exe. Unsigned, so Windows SmartScreen will
+          warn about an unknown publisher.
+
+          The .sha256 beside the zip is the hash to check it against.
+          "@
+
+          gh release view dev *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit dev --title "Springen - development build" --notes $notes --prerelease
+            if ($LASTEXITCODE -ne 0) { throw "could not update the dev release" }
+
+            # The filename carries the version, so yesterday's zip does not get
+            # overwritten - it just sits there looking current.
+            $keep = $assets | ForEach-Object { Split-Path $_ -Leaf }
+            foreach ($old in (gh release view dev --json assets --jq '.assets[].name')) {
+              if ($old -and $keep -notcontains $old) {
+                "Removing stale asset $old"
+                gh release delete-asset dev $old --yes
+                if ($LASTEXITCODE -ne 0) { throw "could not remove $old" }
+              }
+            }
+            gh release upload dev $assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw "could not upload the assets" }
+          } else {
+            gh release create dev $assets `
+              --title "Springen - development build" `
+              --notes $notes `
+              --prerelease `
+              --target ${{ github.sha }}
+            if ($LASTEXITCODE -ne 0) { throw "could not create the dev release" }
+          }
+          "Published $env:SPRINGEN_VERSION"

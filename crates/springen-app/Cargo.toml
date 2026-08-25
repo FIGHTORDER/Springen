@@ -1,0 +1,23 @@
+[package]
+name = "springen-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Springen desktop map design tool"
+
+[[bin]]
+name = "springen-app"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+springen-core = { workspace = true }
+springen-archive = { workspace = true }
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+
+# Host-side, not target-gated: build scripts compile for the host, so a
+# cross-build from Linux still needs this present.
+[build-dependencies]
+winresource = "0.1"

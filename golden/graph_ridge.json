@@ -1,0 +1,171 @@
+{
+ "version": 1,
+ "nextId": 13,
+ "nodes": [
+  {
+   "id": "n1",
+   "type": "ridged",
+   "x": 40,
+   "y": 60,
+   "params": {
+    "feature": 5200,
+    "octaves": 7,
+    "gain": 0.55,
+    "lacunarity": 2.1,
+    "seed": 3
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n2",
+   "type": "noise",
+   "x": 40,
+   "y": 300,
+   "params": {
+    "feature": 1400,
+    "octaves": 6,
+    "gain": 0.5,
+    "lacunarity": 2,
+    "seed": 5
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n3",
+   "type": "mix",
+   "x": 300,
+   "y": 150,
+   "params": {
+    "mode": "blend",
+    "amount": 0.32
+   },
+   "inputs": {
+    "A": "n1",
+    "B": "n2"
+   }
+  },
+  {
+   "id": "n4",
+   "type": "curve",
+   "x": 540,
+   "y": 150,
+   "params": {
+    "mode": "gain",
+    "amount": 0.62
+   },
+   "inputs": {
+    "In": "n3"
+   }
+  },
+  {
+   "id": "n5",
+   "type": "symmetry",
+   "x": 780,
+   "y": 150,
+   "params": {
+    "mode": "rot180",
+    "blend": 1
+   },
+   "inputs": {
+    "In": "n4"
+   }
+  },
+  {
+   "id": "n6",
+   "type": "hydraulic",
+   "x": 1020,
+   "y": 150,
+   "params": {
+    "density": 0.8,
+    "inertia": 0.05,
+    "capacity": 5,
+    "erode": 0.3,
+    "deposit": 0.3,
+    "evaporate": 0.02,
+    "radius": 96,
+    "lifetime": 48
+   },
+   "inputs": {
+    "In": "n5"
+   }
+  },
+  {
+   "id": "n7",
+   "type": "thermal",
+   "x": 1260,
+   "y": 150,
+   "params": {
+    "iterations": 24,
+    "talus": 33,
+    "rate": 0.5
+   },
+   "inputs": {
+    "In": "n6"
+   }
+  },
+  {
+   "id": "n8",
+   "type": "out_height",
+   "x": 1500,
+   "y": 150,
+   "params": {},
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n9",
+   "type": "slopemask",
+   "x": 1260,
+   "y": 360,
+   "params": {
+    "minDeg": 0,
+    "maxDeg": 14,
+    "falloff": 5
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n10",
+   "type": "heightmask",
+   "x": 1260,
+   "y": 530,
+   "params": {
+    "min": 0.34,
+    "max": 0.72,
+    "falloff": 0.06
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n11",
+   "type": "mix",
+   "x": 1500,
+   "y": 430,
+   "params": {
+    "mode": "multiply",
+    "amount": 1
+   },
+   "inputs": {
+    "A": "n9",
+    "B": "n10"
+   }
+  },
+  {
+   "id": "n12",
+   "type": "out_metal",
+   "x": 1740,
+   "y": 430,
+   "params": {
+    "gain": 1
+   },
+   "inputs": {
+    "In": "n11"
+   }
+  }
+ ]
+}

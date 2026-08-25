@@ -1,0 +1,17 @@
+:root{
+  /* 4px grid; the two half-steps exist because tool chrome needs them */
+  --sp-0:0; /* @kind spacing */ --sp-05:2px; --sp-1:4px; --sp-15:6px; --sp-2:8px; --sp-3:12px;
+  --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-10:40px; --sp-12:48px; --sp-16:64px;
+
+  /* control geometry */
+  --ctl-h-sm:22px; --ctl-h:26px; --ctl-h-lg:32px;
+  --row-h:24px;
+  --hairline:1px; /* @kind spacing */
+
+  --radius-0:0; --radius-1:2px; --radius-2:3px; --radius-3:5px; --radius-pill:999px;
+
+  /* fixed chrome dimensions of the workstation shell */
+  --toolbar-h:44px; --statusbar-h:24px;
+  --rail-w:52px; --palette-w:212px; --inspector-w:344px;
+  --panel-pad:12px;
+}

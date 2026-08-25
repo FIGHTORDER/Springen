@@ -1,0 +1,329 @@
+{
+ "version": 1,
+ "nextId": 24,
+ "nodes": [
+  {
+   "id": "n1",
+   "type": "ridged",
+   "x": 40,
+   "y": 60,
+   "params": {
+    "feature": 5200,
+    "octaves": 7,
+    "gain": 0.55,
+    "lacunarity": 2.1,
+    "seed": 3
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n2",
+   "type": "noise",
+   "x": 40,
+   "y": 300,
+   "params": {
+    "feature": 1300,
+    "octaves": 6,
+    "gain": 0.5,
+    "lacunarity": 2,
+    "seed": 5
+   },
+   "inputs": {}
+  },
+  {
+   "id": "n3",
+   "type": "mix",
+   "x": 290,
+   "y": 150,
+   "params": {
+    "mode": "blend",
+    "amount": 0.3
+   },
+   "inputs": {
+    "A": "n1",
+    "B": "n2"
+   }
+  },
+  {
+   "id": "n4",
+   "type": "curve",
+   "x": 520,
+   "y": 150,
+   "params": {
+    "mode": "gain",
+    "amount": 0.6
+   },
+   "inputs": {
+    "In": "n3"
+   }
+  },
+  {
+   "id": "n5",
+   "type": "symmetry",
+   "x": 750,
+   "y": 150,
+   "params": {
+    "mode": "rot180",
+    "blend": 1
+   },
+   "inputs": {
+    "In": "n4"
+   }
+  },
+  {
+   "id": "n6",
+   "type": "hydraulic",
+   "x": 980,
+   "y": 150,
+   "params": {
+    "density": 0.8,
+    "inertia": 0.05,
+    "capacity": 5,
+    "erode": 0.3,
+    "deposit": 0.3,
+    "evaporate": 0.02,
+    "radius": 96,
+    "lifetime": 48
+   },
+   "inputs": {
+    "In": "n5"
+   }
+  },
+  {
+   "id": "n7",
+   "type": "thermal",
+   "x": 1210,
+   "y": 150,
+   "params": {
+    "iterations": 22,
+    "talus": 33,
+    "rate": 0.5
+   },
+   "inputs": {
+    "In": "n6"
+   }
+  },
+  {
+   "id": "n8",
+   "type": "out_height",
+   "x": 1440,
+   "y": 60,
+   "params": {},
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n9",
+   "type": "tex_ramp",
+   "x": 1440,
+   "y": 250,
+   "params": {
+    "ramp": "verdant",
+    "low": 0.18,
+    "high": 0.95,
+    "hue": 0,
+    "sat": 1,
+    "val": 1
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n10",
+   "type": "tex_slope",
+   "x": 1670,
+   "y": 250,
+   "params": {
+    "minDeg": 24,
+    "maxDeg": 44,
+    "rockColor": "#6B6259"
+   },
+   "inputs": {
+    "Colour": "n9",
+    "Height": "n7"
+   }
+  },
+  {
+   "id": "n11",
+   "type": "tex_detail",
+   "x": 1900,
+   "y": 250,
+   "params": {
+    "feature": 180,
+    "octaves": 3,
+    "amount": 0.16,
+    "hueVary": 0.01,
+    "seed": 23
+   },
+   "inputs": {
+    "In": "n10"
+   }
+  },
+  {
+   "id": "n12",
+   "type": "tex_water",
+   "x": 2130,
+   "y": 250,
+   "params": {
+    "sea": 0.18,
+    "shallow": "#2E6E7E",
+    "deep": "#0C2836",
+    "depthScale": 1,
+    "shoreBlend": 0.02
+   },
+   "inputs": {
+    "Colour": "n11",
+    "Height": "n7"
+   }
+  },
+  {
+   "id": "n13",
+   "type": "tex_shade",
+   "x": 2360,
+   "y": 250,
+   "params": {
+    "azimuth": 315,
+    "elevation": 45,
+    "strength": 0.42,
+    "ao": 0.32,
+    "aoRadius": 400
+   },
+   "inputs": {
+    "Colour": "n12",
+    "Height": "n7"
+   }
+  },
+  {
+   "id": "n14",
+   "type": "out_diffuse",
+   "x": 2590,
+   "y": 250,
+   "params": {},
+   "inputs": {
+    "In": "n13"
+   }
+  },
+  {
+   "id": "n15",
+   "type": "slopemask",
+   "x": 1440,
+   "y": 470,
+   "params": {
+    "minDeg": 0,
+    "maxDeg": 12,
+    "falloff": 4
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n16",
+   "type": "heightmask",
+   "x": 1440,
+   "y": 640,
+   "params": {
+    "min": 0.3,
+    "max": 0.8,
+    "falloff": 0.06
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n17",
+   "type": "mix",
+   "x": 1670,
+   "y": 550,
+   "params": {
+    "mode": "multiply",
+    "amount": 1
+   },
+   "inputs": {
+    "A": "n15",
+    "B": "n16"
+   }
+  },
+  {
+   "id": "n18",
+   "type": "out_metal",
+   "x": 1900,
+   "y": 550,
+   "params": {
+    "gain": 1
+   },
+   "inputs": {
+    "In": "n17"
+   }
+  },
+  {
+   "id": "n19",
+   "type": "slopemask",
+   "x": 1440,
+   "y": 810,
+   "params": {
+    "minDeg": 26,
+    "maxDeg": 90,
+    "falloff": 8
+   },
+   "inputs": {
+    "In": "n7"
+   }
+  },
+  {
+   "id": "n20",
+   "type": "out_type",
+   "x": 1670,
+   "y": 810,
+   "params": {
+    "levels": 2
+   },
+   "inputs": {
+    "In": "n19"
+   }
+  },
+  {
+   "id": "n21",
+   "type": "mix",
+   "x": 1900,
+   "y": 700,
+   "params": {
+    "mode": "multiply",
+    "amount": 1
+   },
+   "inputs": {
+    "A": "n15",
+    "B": "n16"
+   }
+  },
+  {
+   "id": "n22",
+   "type": "out_grass",
+   "x": 2130,
+   "y": 700,
+   "params": {
+    "threshold": 0.45
+   },
+   "inputs": {
+    "In": "n21"
+   }
+  },
+  {
+   "id": "n23",
+   "type": "out_splat",
+   "x": 2130,
+   "y": 880,
+   "params": {
+    "normalize": true
+   },
+   "inputs": {
+    "R": "n19",
+    "G": "n15",
+    "B": "n16"
+   }
+  }
+ ]
+}

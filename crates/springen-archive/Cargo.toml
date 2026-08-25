@@ -1,0 +1,15 @@
+[package]
+name = "springen-archive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Blueprint tree generation and .sdd / .sdz / .sd7 packing for Spring/Recoil maps"
+
+[dependencies]
+rayon.workspace = true
+springen-core = { workspace = true }
+sevenz-rust2 = { version = "0.21", default-features = false, features = ["compress"] }
+flate2 = "1"
+serde_json = { workspace = true }
+springen-smf = { workspace = true }

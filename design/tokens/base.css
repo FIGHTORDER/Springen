@@ -1,0 +1,12 @@
+/* Minimal resets shared by every Springen surface. */
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--surface-app);color:var(--text-primary);font:var(--type-ui);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--text-accent);text-decoration:none}
+a:hover{color:var(--accent-hover);text-decoration:underline}
+::selection{background:var(--contour-tint-strong);color:var(--text-primary)}
+:focus-visible{outline:1px solid var(--border-focus);outline-offset:1px}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--surface-canvas)}
+::-webkit-scrollbar-thumb{background:var(--gray-750);border:2px solid var(--surface-canvas)}
+::-webkit-scrollbar-thumb:hover{background:var(--gray-700)}

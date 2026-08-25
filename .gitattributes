@@ -1,0 +1,20 @@
+# Line endings must not be translated on the way to a working tree.
+#
+# `tests/golden.rs` compares generated text against these fixtures **byte for
+# byte** — that is the whole point of the golden suite. Git's default on
+# Windows is to convert LF to CRLF on checkout, which rewrites the fixture and
+# fails `text_outputs_match_character_for_character` with a diff that is
+# entirely invisible: the two strings print identically and differ in every
+# line ending. It cost a CI run to find, so it is pinned here.
+golden/** -text
+
+# The emitted Lua is compared the same way and is read back in tests.
+*.lua -text
+
+# Belt and braces on the binary assets. Git detects these already; saying so
+# means nobody has to rely on the detection.
+*.png binary
+*.ico binary
+*.sd7 binary
+*.smf binary
+*.smt binary
