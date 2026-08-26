@@ -1920,10 +1920,7 @@ impl SpringenApp {
                 }
             }
             if self.brush.mode == StrokeMode::Raise
-                && ui
-                    .selectable_label(self.brush.lower, "Dig")
-                    .on_hover_text("Take ground away instead of piling it on.")
-                    .clicked()
+                && ui.selectable_label(self.brush.lower, "Dig").clicked()
             {
                 self.brush.lower = !self.brush.lower;
             }
