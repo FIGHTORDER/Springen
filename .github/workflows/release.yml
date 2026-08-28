@@ -30,7 +30,7 @@ env:
   # Bumped by hand. `github.run_number` cannot be reset, and it counts runs of
   # this workflow rather than releases of this app - so it neither starts where
   # a version should nor stops where one would.
-  SPRINGEN_VERSION: 1.0.0
+  SPRINGEN_VERSION: 1.0.1
 
 jobs:
   windows:
