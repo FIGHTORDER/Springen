@@ -900,6 +900,53 @@ fn near(a: (f64, f64), b: (f64, f64)) -> bool {
     (dx * dx + dz * dz).sqrt() <= SAME_SPOT
 }
 
+/// Pair each symmetry image with the thing it belongs to, one to one.
+///
+/// `centres` are the candidates, `skip` is the index that was edited and is
+/// therefore not a candidate, and `images` are the positions its images should
+/// land on. The result is one entry per image: the index it claimed, or `None`
+/// if nothing was left.
+///
+/// The obvious loop — for each image take the nearest candidate — can hand the
+/// same one to two images, which then gets moved twice while another is never
+/// moved at all. Under five-fold symmetry that is one team's base quietly
+/// keeping the size and place it had while the rest change, which is exactly
+/// the unfairness the mirroring exists to prevent. Pairs are taken in
+/// ascending distance instead, and each candidate is claimed once.
+pub fn assign_images(
+    centres: &[(f64, f64)],
+    skip: usize,
+    images: &[(f64, f64)],
+) -> Vec<Option<usize>> {
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+    for (k, img) in images.iter().enumerate() {
+        for (j, c) in centres.iter().enumerate() {
+            if j == skip {
+                continue;
+            }
+            let d = (c.0 - img.0).powi(2) + (c.1 - img.1).powi(2);
+            pairs.push((d, k, j));
+        }
+    }
+    // Distance first, then indices, so an exact tie resolves the same way
+    // every run rather than however the sort happened to land.
+    pairs.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+    });
+    let mut out = vec![None; images.len()];
+    let mut taken = vec![false; centres.len()];
+    for (_, k, j) in pairs {
+        if out[k].is_none() && !taken[j] {
+            out[k] = Some(j);
+            taken[j] = true;
+        }
+    }
+    out
+}
+
 /// Whether a point is its own mirror under `mode` — that is, whether it sits
 /// on the operator's fixed set.
 ///
@@ -1571,5 +1618,54 @@ mod tests {
             off_fixed_set((1200.0, 900.0), "mirrorX", w, h),
             Some((1200.0, 900.0))
         );
+    }
+
+    /// Every image gets its own partner, even when two images are nearest to
+    /// the same one.
+    ///
+    /// Taking the nearest per image independently hands that shared candidate
+    /// to both and leaves a third untouched — one team's base keeping what it
+    /// had while the rest move.
+    #[test]
+    fn images_are_assigned_one_to_one() {
+        // Three candidates, two of them almost on top of each other, and two
+        // images that both sit nearest the crowded pair.
+        let centres = [(0.0, 0.0), (100.0, 0.0), (104.0, 0.0), (900.0, 0.0)];
+        let images = [(101.0, 0.0), (102.0, 0.0)];
+        let got = assign_images(&centres, 0, &images);
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().all(Option::is_some), "an image went unassigned");
+        assert_ne!(got[0], got[1], "both images claimed the same candidate");
+        assert!(
+            !got.contains(&Some(0)),
+            "the edited one was used as a candidate"
+        );
+
+        // A full five-fold layout assigns every image to a distinct box.
+        let (w, h) = (6144.0, 6144.0);
+        let primary = (1400.0, 2000.0);
+        let mut centres = vec![primary];
+        centres.extend(symmetry_images(primary.0, primary.1, "rot72", w, h));
+        let images = symmetry_images(primary.0, primary.1, "rot72", w, h);
+        let got = assign_images(&centres, 0, &images);
+        let mut claimed: Vec<usize> = got.iter().filter_map(|x| *x).collect();
+        claimed.sort_unstable();
+        claimed.dedup();
+        assert_eq!(
+            claimed.len(),
+            4,
+            "five-fold did not assign four distinct boxes"
+        );
+        assert!(!claimed.contains(&0));
+    }
+
+    /// Fewer candidates than images leaves the surplus unassigned rather than
+    /// doubling up or panicking.
+    #[test]
+    fn assignment_copes_with_too_few_candidates() {
+        let centres = [(0.0, 0.0), (10.0, 0.0)];
+        let images = [(11.0, 0.0), (12.0, 0.0), (13.0, 0.0)];
+        let got = assign_images(&centres, 0, &images);
+        assert_eq!(got.iter().filter(|x| x.is_some()).count(), 1);
     }
 }

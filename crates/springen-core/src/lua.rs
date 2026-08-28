@@ -382,12 +382,91 @@ impl StartArea {
             p.1 += dz;
         }
     }
+    /// Replace the polygon with an axis-aligned rectangle.
+    ///
+    /// The corners are ordered clockwise, which is what
+    /// `mapconfig/map_startboxes.lua` documents and what the even-odd test in
+    /// `inside` assumes.
+    pub fn set_bounds(&mut self, x0: f64, z0: f64, x1: f64, z1: f64, w: f64, h: f64) {
+        let (a, b) = (x0.min(x1).clamp(0.0, w), x0.max(x1).clamp(0.0, w));
+        let (c, d) = (z0.min(z1).clamp(0.0, h), z0.max(z1).clamp(0.0, h));
+        // A box with no area cannot hold a start point, so it keeps a floor.
+        const MIN: f64 = 64.0;
+        let b = if b - a < MIN { (a + MIN).min(w) } else { b };
+        let d = if d - c < MIN { (c + MIN).min(h) } else { d };
+        self.poly = vec![(a, c), (b, c), (b, d), (a, d)];
+    }
+
+    /// The shape this area currently is.
+    pub fn shape(&self) -> Shape {
+        match self.poly.len() {
+            3 => Shape::Wedge,
+            _ if self.is_rect() => Shape::Rect,
+            _ => Shape::Free,
+        }
+    }
+
+    fn is_rect(&self) -> bool {
+        if self.poly.len() != 4 {
+            return false;
+        }
+        let (x0, z0, x1, z1) = self.bounds();
+        self.poly
+            .iter()
+            .all(|(x, z)| (*x == x0 || *x == x1) && (*z == z0 || *z == z1))
+    }
+
+    /// Re-cut the area to a shape, keeping the ground it covers.
+    ///
+    /// A wedge is the triangle against whichever corner of the bounds is
+    /// nearest the map edge — which is where a corner start sits, and the
+    /// shape `diagonal` symmetry has always produced.
+    pub fn set_shape(&mut self, shape: Shape, w: f64, h: f64) {
+        let (x0, z0, x1, z1) = self.bounds();
+        match shape {
+            Shape::Rect | Shape::Free => self.set_bounds(x0, z0, x1, z1, w, h),
+            Shape::Wedge => {
+                let (cx, cz) = ((x0 + x1) * 0.5, (z0 + z1) * 0.5);
+                let west = cx < w * 0.5;
+                let north = cz < h * 0.5;
+                self.poly = match (west, north) {
+                    (true, true) => vec![(x0, z0), (x1, z0), (x0, z1)],
+                    (false, true) => vec![(x1, z0), (x1, z1), (x0, z0)],
+                    (false, false) => vec![(x1, z1), (x0, z1), (x1, z0)],
+                    (true, false) => vec![(x0, z1), (x0, z0), (x1, z1)],
+                };
+            }
+        }
+    }
+
     /// Scale about the centre, keeping the shape and staying on the map.
     pub fn scale(&mut self, k: f64, w: f64, h: f64) {
         let (cx, cz) = self.centre();
         for p in self.poly.iter_mut() {
             p.0 = (cx + (p.0 - cx) * k).clamp(0.0, w);
             p.1 = (cz + (p.1 - cz) * k).clamp(0.0, h);
+        }
+    }
+}
+
+/// What shape a start area is cut to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shape {
+    Rect,
+    /// A right triangle in a corner, which is what a corner start wants and
+    /// what `diagonal` symmetry has always produced.
+    Wedge,
+    /// Anything else — an imported map's box, or one built by hand.
+    Free,
+}
+
+impl Shape {
+    pub const ALL: [Shape; 2] = [Shape::Rect, Shape::Wedge];
+    pub fn label(self) -> &'static str {
+        match self {
+            Shape::Rect => "Rect",
+            Shape::Wedge => "Wedge",
+            Shape::Free => "Free",
         }
     }
 }
@@ -905,5 +984,79 @@ mod tests {
         let (nx0, nz0, nx1, nz1) = a.bounds();
         assert!(((nx1 - nx0) - (x1 - x0) * 0.5).abs() < 1e-6);
         assert!(((nz1 - nz0) - (z1 - z0) * 0.5).abs() < 1e-6);
+    }
+
+    /// Setting bounds gives a rectangle, in order, on the map, with area.
+    #[test]
+    fn bounds_editing_produces_a_usable_rectangle() {
+        let d = crate::spring::derive(12, 12);
+        let (w, h) = (6144.0, 6144.0);
+        let mut a = default_areas(&d, "mirrorX")[0].clone();
+        // Given backwards and out of range on purpose.
+        a.set_bounds(5000.0, -400.0, 1000.0, 9000.0, w, h);
+        let (x0, z0, x1, z1) = a.bounds();
+        assert_eq!((x0, x1), (1000.0, 5000.0), "corners were not sorted");
+        assert_eq!(
+            (z0, z1),
+            (0.0, 6144.0),
+            "corners were not clamped to the map"
+        );
+        assert_eq!(a.shape(), Shape::Rect);
+        assert_eq!(a.poly.len(), 4);
+
+        // A degenerate box would have nowhere to put a start point.
+        a.set_bounds(2000.0, 2000.0, 2000.0, 2000.0, w, h);
+        let (x0, z0, x1, z1) = a.bounds();
+        assert!(
+            x1 - x0 >= 64.0 && z1 - z0 >= 64.0,
+            "a zero-area box was allowed"
+        );
+    }
+
+    /// A wedge keeps the ground the rectangle covered and stays inside it, so
+    /// switching shape does not move a base across the map.
+    #[test]
+    fn a_wedge_stays_inside_the_bounds_it_came_from() {
+        let d = crate::spring::derive(12, 12);
+        let (w, h) = (6144.0, 6144.0);
+        for i in 0..4 {
+            let mut a = default_areas(&d, "quad")[i].clone();
+            let before = a.bounds();
+            a.set_shape(Shape::Wedge, w, h);
+            assert_eq!(a.shape(), Shape::Wedge);
+            assert_eq!(a.poly.len(), 3);
+            for (x, z) in &a.poly {
+                assert!(
+                    *x >= before.0 - 1e-9 && *x <= before.2 + 1e-9,
+                    "wedge corner {x} outside {before:?}"
+                );
+                assert!(*z >= before.1 - 1e-9 && *z <= before.3 + 1e-9);
+            }
+            // And back again is the rectangle it started as.
+            a.set_shape(Shape::Rect, w, h);
+            assert_eq!(a.bounds(), before);
+        }
+    }
+
+    /// A wedge still holds a start point, which is the only thing a box is
+    /// actually for.
+    #[test]
+    fn a_wedge_still_gets_a_start_point_inside_it() {
+        let d = crate::spring::derive(12, 12);
+        let mut areas = default_areas(&d, "quad");
+        for a in areas.iter_mut() {
+            a.set_shape(Shape::Wedge, 6144.0, 6144.0);
+        }
+        let boxes = startboxes_from(&areas, &d, "quad", None);
+        assert_eq!(boxes.len(), 4);
+        for (b, a) in boxes.iter().zip(areas.iter()) {
+            let (sx, sz) = b.start_points[0];
+            let (x0, z0, x1, z1) = a.bounds();
+            assert!(
+                sx >= x0 - 1.0 && sx <= x1 + 1.0 && sz >= z0 - 1.0 && sz <= z1 + 1.0,
+                "start point {sx},{sz} is outside its wedge {:?}",
+                a.bounds()
+            );
+        }
     }
 }

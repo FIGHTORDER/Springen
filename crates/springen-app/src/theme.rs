@@ -271,16 +271,32 @@ pub fn micro_label(ui: &mut egui::Ui, text: &str) {
 pub fn stat_row(ui: &mut egui::Ui, label: &str, value: &str, hero: bool) {
     ui.horizontal(|ui| {
         ui.set_min_height(ROW_H);
-        ui.label(
-            egui::RichText::new(label)
-                .font(font(FontRole::Ui, 12.0))
-                .color(TEXT_SECONDARY),
+        // Both halves are given a share and both truncate. Left to itself a
+        // horizontal row lets the label run under the right-aligned value, so
+        // a narrow rail printed the two on top of each other.
+        let w = ui.available_width();
+        ui.allocate_ui_with_layout(
+            egui::Vec2::new(w * 0.46, ROW_H),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(label)
+                            .font(font(FontRole::Ui, 12.0))
+                            .color(TEXT_SECONDARY),
+                    )
+                    .truncate(),
+                );
+            },
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                egui::RichText::new(value)
-                    .font(font(FontRole::Mono, 12.0))
-                    .color(if hero { ACCENT } else { TEXT_DATA }),
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(value)
+                        .font(font(FontRole::Mono, 12.0))
+                        .color(if hero { ACCENT } else { TEXT_DATA }),
+                )
+                .truncate(),
             );
         });
     });

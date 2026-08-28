@@ -155,6 +155,31 @@ impl Stages<'_> {
 /// Evaluate, bake and assemble. Binary layers are written under `work_dir`
 /// and referenced from the blueprint by path, so a large map never has to be
 /// held in memory twice.
+/// How wide the splat distribution and specular maps should be.
+///
+/// These used to be pinned at 1024² whatever the map, on the strength of a
+/// measurement that said SSMF resources are a fixed size rather than
+/// map-sized. That is true of the *format* and false as advice: the reference
+/// map is 5120 elmos across and ships a 1024² distribution, which is five
+/// elmos to a pixel. Holding 1024 for every map means a 24x24 gets twelve
+/// elmos to a pixel — the same file, two and a half times blurrier than the
+/// map it was measured from.
+///
+/// So the number that stays fixed is the sampling, not the size. Powers of
+/// two because a GPU wants them, floored at 1024 so nothing gets worse than
+/// it was, and capped at 4096 because past that the archive grows faster than
+/// the map improves.
+pub fn ssmf_res(elmos: f64) -> usize {
+    /// Elmos per pixel on the reference map's `dist.png`.
+    const REFERENCE: f64 = 5.0;
+    let want = elmos / REFERENCE;
+    let mut r = 1024usize;
+    while (r as f64) < want && r < 4096 {
+        r *= 2;
+    }
+    r
+}
+
 pub fn bake(
     project: &Project,
     graph: &Graph,
@@ -582,32 +607,32 @@ pub fn bake_with_progress(
 
     stage.mark("SMF");
 
-    /* -- SSMF resources at their fixed 1024², not map-sized -------------- */
-    const SSMF: usize = 1024;
+    /* -- SSMF resources, sized to hold a shipped map's detail ------------ */
+    let ssmf = ssmf_res(f64::from(d.elmos_x).max(f64::from(d.elmos_y)));
     let splat_png = {
         let field = match graph.find_terminal("splat") {
             Some(id) => graph.evaluate(id, &ctx),
             None => std::sync::Arc::new(Field::new(res, 4)),
         };
         encode(
-            SSMF,
-            SSMF,
+            ssmf,
+            ssmf,
             PngColor::Rgba,
             8,
-            &bake_rgba(&field, SSMF, SSMF),
+            &bake_rgba(&field, ssmf, ssmf),
             Compression::Deflate,
         )
     };
     let spec_png = {
         // Water is specular, land is matte. A real specular map is art; this
         // is a defensible starting point the author can replace.
-        let mut samples = vec![0u16; SSMF * SSMF * 4];
-        let hs = (res - 1) as f64 / (SSMF - 1) as f64;
+        let mut samples = vec![0u16; ssmf * ssmf * 4];
+        let hs = (res - 1) as f64 / (ssmf - 1) as f64;
         samples
-            .par_chunks_mut(SSMF * 4)
+            .par_chunks_mut(ssmf * 4)
             .enumerate()
             .for_each(|(y, row)| {
-                for x in 0..SSMF {
+                for x in 0..ssmf {
                     let v = springen_core::field::sample_bilinear(
                         &height_gray,
                         x as f64 * hs,
@@ -622,8 +647,8 @@ pub fn bake_with_progress(
                 }
             });
         encode(
-            SSMF,
-            SSMF,
+            ssmf,
+            ssmf,
             PngColor::Rgba,
             8,
             &samples,
@@ -1019,5 +1044,30 @@ mod tests {
             panic!("an odd size unit must be refused");
         };
         assert!(e.to_string().contains("divide by 128"), "{e}");
+    }
+
+    /// The distribution map has to hold at least as much detail per elmo as a
+    /// shipped map's does, at every size we can bake.
+    #[test]
+    fn the_splat_distribution_is_never_coarser_than_a_shipped_map() {
+        // The reference: 5120 elmos across a 1024 texture.
+        const REFERENCE: f64 = 5120.0 / 1024.0;
+        for units in [2u32, 4, 8, 12, 16, 24, 32, 64] {
+            let elmos = f64::from(units) * 512.0;
+            let r = ssmf_res(elmos);
+            assert!(r.is_power_of_two(), "{units}: {r} is not a power of two");
+            assert!(r >= 1024, "{units}: {r} is coarser than the old fixed size");
+            assert!(r <= 4096, "{units}: {r} is past the cap");
+            if r < 4096 {
+                let per_px = elmos / r as f64;
+                assert!(
+                    per_px <= REFERENCE + 1e-9,
+                    "{units}x{units}: {per_px:.1} elmos a pixel against the reference {REFERENCE:.1}"
+                );
+            }
+        }
+        // The old behaviour is preserved exactly where it was already good
+        // enough, so small maps do not silently grow.
+        assert_eq!(ssmf_res(4096.0), 1024);
     }
 }

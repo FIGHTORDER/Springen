@@ -8,6 +8,7 @@
 
 mod app;
 mod graph_view;
+mod panels;
 mod theme;
 mod view3d;
 
@@ -47,7 +48,7 @@ fn main() -> eframe::Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "springen [--starter ridge|islands|textured] [--screen splash|projects|workspace|terrain]\n         [--screenshot <file.png>] [--smoke <out.sd7>]"
+                    "springen [--starter ridge|islands|textured] [--screen splash|projects|workspace|terrain|floating]\n         [--screenshot <file.png>] [--smoke <out.sd7>]"
                 );
                 return Ok(());
             }

@@ -1019,7 +1019,11 @@ pub fn render_set(set: &MaterialSet, seed: f64) -> SplatMaterials {
         .into_par_iter()
         .map(|i| Arc::new(render(set.channel(i), res, seed + i as f64 * 1009.0, 1.0)))
         .collect();
-    let detail_res = (res / 2).max(64);
+    // Full tile resolution, not half. The reference map ships `cont_DET.bmp`
+    // at 512² and the engine repeats it every 50 elmos, so this is the one
+    // texture a player is ever close enough to resolve — halving it threw
+    // away the detail the slot exists for.
+    let detail_res = res;
     SplatMaterials {
         albedo: [
             Arc::clone(&rendered[0]),

@@ -22,6 +22,7 @@ use springen_core::starter::{starter_graph, STARTERS};
 use springen_core::zk;
 
 use crate::graph_view::{Action, GraphView};
+use crate::panels::{Dock, Layout, Pane};
 use crate::theme::{self, FontRole};
 use crate::view3d::{self, Camera, ViewMode};
 
@@ -116,9 +117,134 @@ struct BakeJob {
     started: f64,
 }
 
-/// Squared distance between two world points, for nearest-image matching.
-fn dist2(a: (f64, f64), b: (f64, f64)) -> f64 {
-    (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)
+/// The marks on a pane header.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Icon {
+    ChevronDown,
+    ChevronRight,
+    Close,
+    Float,
+    DockLeft,
+    DockRight,
+    Up,
+    Down,
+}
+
+/// A header button, drawn rather than typed.
+///
+/// The bundled face carries the text this app sets and nothing else, so
+/// arrows and box glyphs come out as tofu. Three or four line segments cost
+/// less than shipping a symbol font for eight marks.
+fn icon_button(ui: &mut egui::Ui, icon: Icon) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
+    let ink = if resp.hovered() {
+        theme::TEXT_PRIMARY
+    } else {
+        theme::TEXT_TERTIARY
+    };
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, theme::R_CONTROL, theme::SURFACE_HOVER);
+    }
+    let p = ui.painter();
+    let c = rect.center();
+    let s = Stroke::new(1.2, ink);
+    match icon {
+        Icon::ChevronDown => {
+            p.line_segment([c + Vec2::new(-3.0, -1.5), c + Vec2::new(0.0, 2.0)], s);
+            p.line_segment([c + Vec2::new(0.0, 2.0), c + Vec2::new(3.0, -1.5)], s);
+        }
+        Icon::ChevronRight => {
+            p.line_segment([c + Vec2::new(-1.5, -3.0), c + Vec2::new(2.0, 0.0)], s);
+            p.line_segment([c + Vec2::new(2.0, 0.0), c + Vec2::new(-1.5, 3.0)], s);
+        }
+        Icon::Close => {
+            p.line_segment([c + Vec2::new(-3.0, -3.0), c + Vec2::new(3.0, 3.0)], s);
+            p.line_segment([c + Vec2::new(-3.0, 3.0), c + Vec2::new(3.0, -3.0)], s);
+        }
+        Icon::Float => {
+            let r = egui::Rect::from_center_size(c, Vec2::splat(7.0));
+            p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
+            p.line_segment([r.left_top(), r.right_top()], Stroke::new(2.0, ink));
+        }
+        Icon::DockLeft | Icon::DockRight => {
+            let r = egui::Rect::from_center_size(c, Vec2::splat(8.0));
+            p.rect_stroke(r, 0.0, s, egui::StrokeKind::Inside);
+            let bar = if icon == Icon::DockLeft {
+                egui::Rect::from_min_size(r.left_top(), Vec2::new(3.0, r.height()))
+            } else {
+                egui::Rect::from_min_size(
+                    r.left_top() + Vec2::new(5.0, 0.0),
+                    Vec2::new(3.0, r.height()),
+                )
+            };
+            p.rect_filled(bar, 0.0, ink);
+        }
+        Icon::Up | Icon::Down => {
+            let d = if icon == Icon::Up { -1.0 } else { 1.0 };
+            p.line_segment(
+                [c + Vec2::new(0.0, -3.0 * d), c + Vec2::new(0.0, 3.0 * d)],
+                s,
+            );
+            p.line_segment(
+                [c + Vec2::new(-2.5, -0.5 * d), c + Vec2::new(0.0, -3.0 * d)],
+                s,
+            );
+            p.line_segment(
+                [c + Vec2::new(2.5, -0.5 * d), c + Vec2::new(0.0, -3.0 * d)],
+                s,
+            );
+        }
+    }
+    resp
+}
+
+/// One corner of an area's bounds. Bit 0 picks the west/east side, bit 1 the
+/// north/south one, so the opposite corner is simply `k ^ 3`.
+fn corner_of(a: &springen_core::lua::StartArea, k: u8) -> (f64, f64) {
+    let (x0, z0, x1, z1) = a.bounds();
+    (
+        if k & 1 == 0 { x0 } else { x1 },
+        if k & 2 == 0 { z0 } else { z1 },
+    )
+}
+
+/// After one box is reshaped, give its symmetry images the same size in the
+/// place the operator puts them.
+///
+/// Size and shape are copied, position is not: an image belongs where the
+/// operator says, and a hand edit that changes one team's area without the
+/// others is how a map goes quietly unfair.
+fn reflow_images(
+    areas: &mut [springen_core::lua::StartArea],
+    edited: usize,
+    sym: &str,
+    w: f64,
+    h: f64,
+) {
+    let src = areas[edited].clone();
+    let (sx0, sz0, sx1, sz1) = src.bounds();
+    let (sw, sh) = (sx1 - sx0, sz1 - sz0);
+    let from = src.centre();
+    let images = springen_core::zk::symmetry_images(from.0, from.1, sym, w, h);
+    let centres: Vec<(f64, f64)> = areas.iter().map(|a| a.centre()).collect();
+    let shape = src.shape();
+    // One box per image, each claimed once — see `zk::assign_images`.
+    let pick = springen_core::zk::assign_images(&centres, edited, &images);
+    for ((ix, iz), which) in images.iter().zip(pick) {
+        let Some(j) = which else { continue };
+        areas[j].set_bounds(
+            ix - sw * 0.5,
+            iz - sh * 0.5,
+            ix + sw * 0.5,
+            iz + sh * 0.5,
+            w,
+            h,
+        );
+        if shape != springen_core::lua::Shape::Rect {
+            areas[j].set_shape(shape, w, h);
+        }
+    }
 }
 
 /// The sculpt brush's settings.
@@ -223,6 +349,8 @@ pub struct SpringenApp {
     /// What happened to the last spot placed, when it is worth saying.
     spot_note: Option<String>,
     box_drag: Option<usize>,
+    /// Which corner of the dragged box, if a handle was grabbed.
+    box_corner: Option<u8>,
     selected_box: Option<usize>,
     show_boxes: bool,
     /// Whether a hand edit carries the spot's symmetry images with it.
@@ -243,6 +371,16 @@ pub struct SpringenApp {
     out_dir: PathBuf,
     /// The project file on disk, once there is one.
     project_path: Option<PathBuf>,
+    /// Where every inspector pane sits.
+    layout: Layout,
+    /// What the node palette is filtered to.
+    palette_filter: String,
+    /// Recently opened project files, most recent first.
+    recent: Vec<PathBuf>,
+    /// The document as it was last written or read, for the unsaved check.
+    saved_doc: String,
+    /// Waiting on an answer about discarding unsaved work.
+    confirm_home: bool,
     /// Undo history, as whole documents. A graph is small and a document is
     /// the only snapshot that also captures size, seed and name.
     undo: Vec<String>,
@@ -312,6 +450,7 @@ impl SpringenApp {
             brush_last: None,
             spot_note: None,
             box_drag: None,
+            box_corner: None,
             selected_box: None,
             show_boxes: true,
             mirror_edits: true,
@@ -324,6 +463,11 @@ impl SpringenApp {
             game: Game::ZeroK,
             out_dir: springen_core::project::default_output_dir(),
             project_path: None,
+            layout: Layout::stock(),
+            palette_filter: String::new(),
+            recent: Vec::new(),
+            saved_doc: String::new(),
+            confirm_home: false,
             undo: Vec::new(),
             redo: Vec::new(),
             pending_undo: None,
@@ -346,7 +490,9 @@ impl SpringenApp {
             }
         }
         app.repropose_spots();
+        app.load_settings();
         app.last_doc = app.document();
+        app.saved_doc = app.document();
         app
     }
 
@@ -374,6 +520,14 @@ impl SpringenApp {
         self.screen = match screen {
             "splash" => Screen::Splash,
             "projects" => Screen::Projects,
+            "floating" => {
+                // A screenshot target: two panes off the rail, so the floating
+                // case is checked on a machine with no one to drag them.
+                self.layout.move_to(Pane::Metal, Dock::Float);
+                self.layout.move_to(Pane::Materials, Dock::Float);
+                self.layout.move_to(Pane::Measure, Dock::Left);
+                Screen::Workspace
+            }
             _ => Screen::Workspace,
         };
         if screen == "terrain" {
@@ -406,9 +560,7 @@ impl SpringenApp {
     fn load_document(&mut self, text: &str) -> Result<(), String> {
         let doc: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let pj = doc.get("project").unwrap_or(&doc);
-        let gj = doc
-            .get("graph")
-            .ok_or("That file has no graph key, so it is not a Springen project.")?;
+        let gj = doc.get("graph").ok_or("Not a Springen project")?;
         self.project = Project::from_json(pj);
         self.graph = Graph::deserialize(gj);
         self.view = GraphView::default();
@@ -457,6 +609,8 @@ impl SpringenApp {
                     }
                     self.terrain_sig.clear();
                     self.project_path = Some(path.clone());
+                    self.saved_doc = self.document();
+                    self.remember(&path);
                     self.toast(ctx, Level::Ok, format!("Opened {}", path.display()));
                 }
                 Err(e) => self.toast(ctx, Level::Error, format!("{}: {e}", path.display())),
@@ -489,10 +643,206 @@ impl SpringenApp {
         match std::fs::write(&path, self.document()) {
             Ok(()) => {
                 self.project_path = Some(path.clone());
+                self.saved_doc = self.document();
+                self.remember(&path);
                 self.toast(ctx, Level::Ok, format!("Saved {}", path.display()));
             }
             Err(e) => self.toast(ctx, Level::Error, format!("{}: {e}", path.display())),
         }
+    }
+
+    /// The one modal in the app: leaving unsaved work.
+    ///
+    /// Three ways out and all of them stated, rather than a yes/no that hides
+    /// what "no" does.
+    fn confirm_dialog(&mut self, ctx: &egui::Context) {
+        if !self.confirm_home {
+            return;
+        }
+        let mut close = false;
+        egui::Modal::new(egui::Id::new("confirm-home")).show(ctx, |ui| {
+            ui.set_width(320.0);
+            ui.label(
+                RichText::new("Unsaved changes")
+                    .font(theme::font(FontRole::Ui, 13.0))
+                    .color(theme::TEXT_PRIMARY),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ghost_button(ui, "Save and leave").clicked() {
+                    self.save_project(ctx, false);
+                    if !self.unsaved() {
+                        self.screen = Screen::Projects;
+                        close = true;
+                    }
+                }
+                if ghost_button(ui, "Discard").clicked() {
+                    self.screen = Screen::Projects;
+                    close = true;
+                }
+                if ghost_button(ui, "Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if close {
+            self.confirm_home = false;
+        }
+    }
+
+    /// Bring in an existing map: a `.sd7`, a `.sdd` folder or a bare `.smf`.
+    ///
+    /// The importer was command-line only, which meant the one workflow that
+    /// starts from somebody else's map could not be reached from the tool that
+    /// edits maps.
+    fn import_map(&mut self, ctx: &egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Spring map", &["sd7", "sdd", "smf"])
+            .set_directory(&self.out_dir)
+            .pick_file()
+        else {
+            return;
+        };
+        // `read_map` already sorts out an archive from a folder from a bare
+        // `.smf`, so whatever was picked goes straight to it.
+        let target = path;
+        let map = match springen_archive::import::read_map(&target) {
+            Ok(m) => m,
+            Err(e) => {
+                self.toast(ctx, Level::Error, format!("{}: {e}", target.display()));
+                return;
+            }
+        };
+        let name = target
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Imported".into());
+        let imported = springen_archive::import::to_project(&map, &name);
+        // Anything the importer could not bring across is worth one line each;
+        // they are findings about this map, not instructions.
+        for note in &imported.notes {
+            self.toast(ctx, Level::Info, note.clone());
+        }
+        self.project = imported.project;
+        self.graph = imported.graph;
+        self.rasters = std::sync::Arc::new(imported.rasters);
+        self.project_path = None;
+        self.saved_doc = String::new();
+        self.undo.clear();
+        self.redo.clear();
+        self.selected_spot = None;
+        self.selected_box = None;
+        self.materials = None;
+        self.mat_thumbs.clear();
+        self.thumb_sig.clear();
+        self.terrain_sig.clear();
+        self.repropose_spots();
+        self.fit_pending = true;
+        self.screen = Screen::Workspace;
+    }
+
+    /* --------------------------------------------------- session settings */
+
+    /// Where the workstation keeps what it remembers between runs.
+    ///
+    /// Beside the maps rather than in a platform config directory: the output
+    /// folder is already the place this tool owns, and a user who moves their
+    /// Springen folder to another machine should find their layout there too.
+    fn settings_path() -> std::path::PathBuf {
+        springen_core::project::default_output_dir().join("workstation.json")
+    }
+
+    fn load_settings(&mut self) {
+        let Ok(text) = std::fs::read_to_string(Self::settings_path()) else {
+            return;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return;
+        };
+        if let Some(l) = v.get("layout") {
+            self.layout = Layout::from_json(l);
+        }
+        if let Some(dir) = v.get("outDir").and_then(|x| x.as_str()) {
+            self.out_dir = std::path::PathBuf::from(dir);
+        }
+        if let Some(list) = v.get("recent").and_then(|x| x.as_array()) {
+            self.recent = list
+                .iter()
+                .filter_map(|x| x.as_str().map(std::path::PathBuf::from))
+                .collect();
+        }
+    }
+
+    /// Best effort: a settings file that cannot be written is not worth
+    /// interrupting anyone over.
+    fn save_settings(&self) {
+        let v = serde_json::json!({
+            "layout": self.layout.to_json(),
+            "outDir": self.out_dir.to_string_lossy(),
+            "recent": self.recent.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+        });
+        let path = Self::settings_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+
+    /// Remember a project file, most recent first, without duplicates.
+    fn remember(&mut self, path: &std::path::Path) {
+        self.recent.retain(|p| p != path);
+        self.recent.insert(0, path.to_path_buf());
+        self.recent.truncate(8);
+        self.save_settings();
+    }
+
+    /// Whether there is work that would be lost.
+    fn unsaved(&self) -> bool {
+        self.document() != self.saved_doc
+    }
+
+    /// Back to the project browser.
+    ///
+    /// Asks first when there is unsaved work, because the browser replaces the
+    /// session and there is no undo across that.
+    fn go_home(&mut self, ctx: &egui::Context) {
+        if self.unsaved() {
+            self.confirm_home = true;
+            return;
+        }
+        self.screen = Screen::Projects;
+        let _ = ctx;
+    }
+
+    /// Load a project from a known path, for the recent list.
+    fn open_path(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.toast(ctx, Level::Error, format!("{}: {e}", path.display()));
+                self.recent.retain(|p| *p != path);
+                self.save_settings();
+                return;
+            }
+        };
+        if let Err(e) = self.load_document(&text) {
+            self.toast(ctx, Level::Error, format!("{}: {e}", path.display()));
+            return;
+        }
+        self.undo.clear();
+        self.redo.clear();
+        if let Ok(r) = springen_archive::import::read_project_rasters(&path) {
+            self.rasters = std::sync::Arc::new(r);
+        }
+        self.terrain_sig.clear();
+        self.thumb_sig.clear();
+        self.materials = None;
+        self.repropose_spots();
+        self.fit_pending = true;
+        self.project_path = Some(path.clone());
+        self.saved_doc = self.document();
+        self.remember(&path);
+        self.screen = Screen::Workspace;
     }
 
     /* -------------------------------------------------------------- undo */
@@ -564,6 +914,55 @@ impl SpringenApp {
             self.redo(ctx);
         } else if hit(Key::Z, Modifiers::COMMAND) {
             self.undo(ctx);
+        }
+        if hit(Key::B, Modifiers::COMMAND) {
+            self.start_bake(ctx);
+        }
+        // Duplicate the selected node, offset so it does not hide under the
+        // original, with its parameters but not its wires — a copy that
+        // inherited inputs would quietly double whatever they feed.
+        if hit(Key::D, Modifiers::COMMAND) {
+            if let Some(id) = self.view.selected.clone() {
+                if let Some(src) = self.graph.node(&id).cloned() {
+                    let new_id = self
+                        .graph
+                        .add(&src.type_name, src.x + 32.0, src.y + 32.0, &[]);
+                    if let Some(dst) = self.graph.node_mut(&new_id) {
+                        dst.params = src.params.clone();
+                    }
+                    self.view.selected = Some(new_id);
+                    self.terrain_sig.clear();
+                    self.thumb_sig.clear();
+                }
+            }
+        }
+        if hit(Key::F, Modifiers::NONE) {
+            self.fit_pending = true;
+        }
+        if hit(Key::Tab, Modifiers::NONE) {
+            self.mode = match self.mode {
+                CanvasMode::Graph => CanvasMode::Terrain,
+                CanvasMode::Terrain => CanvasMode::Graph,
+            };
+        }
+        // 1-6 pick a view, which is the switch you reach for most while
+        // looking at terrain.
+        for (i, key) in [
+            Key::Num1,
+            Key::Num2,
+            Key::Num3,
+            Key::Num4,
+            Key::Num5,
+            Key::Num6,
+        ]
+        .iter()
+        .enumerate()
+        {
+            if hit(*key, Modifiers::NONE) {
+                if let Some(m) = ViewMode::ALL.get(i) {
+                    self.view_mode = *m;
+                }
+            }
         }
     }
 
@@ -679,7 +1078,7 @@ impl SpringenApp {
                 Some(p) => {
                     if p != want {
                         note = Some(format!(
-                            "That point is its own mirror under {}, so it would have been a single spot. Moved to {:.0},{:.0} to make a group of {}.",
+                            "On the {} axis — moved to {:.0},{:.0} for a group of {}",
                             self.project.mex_sym,
                             p.0,
                             p.1,
@@ -689,9 +1088,7 @@ impl SpringenApp {
                     p
                 }
                 None => {
-                    note = Some(
-                        "Nowhere near there can hold a full symmetry group, so this spot stands alone.".into(),
-                    );
+                    note = Some("No full group nearby — placed alone".into());
                     want
                 }
             }
@@ -915,24 +1312,15 @@ impl SpringenApp {
                 } else {
                     egui::vec2(side * (ex / ey) as f32, side)
                 };
-                match &self.graph_map_tex {
-                    Some(tex) => {
-                        let r = ui.add(
-                            egui::Image::new(tex)
-                                .fit_to_exact_size(shape)
-                                .corner_radius(theme::R_CONTROL),
-                        );
-                        // Clicking it is the obvious thing to try.
-                        if r.interact(Sense::click()).clicked() {
-                            self.mode = CanvasMode::Terrain;
-                        }
-                    }
-                    None => {
-                        ui.label(
-                            RichText::new("Wire a field into the Heightmap out node.")
-                                .font(theme::font(FontRole::Ui, 11.0))
-                                .color(theme::TEXT_TERTIARY),
-                        );
+                if let Some(tex) = &self.graph_map_tex {
+                    let r = ui.add(
+                        egui::Image::new(tex)
+                            .fit_to_exact_size(shape)
+                            .corner_radius(theme::R_CONTROL),
+                    );
+                    // Clicking it is the obvious thing to try.
+                    if r.interact(Sense::click()).clicked() {
+                        self.mode = CanvasMode::Terrain;
                     }
                 }
                 ui.add_space(4.0);
@@ -1028,10 +1416,7 @@ impl SpringenApp {
             self.toast(
                 ctx,
                 Level::Error,
-                format!(
-                    "Cannot create {}: {e}. Pick an output folder you can write to.",
-                    self.out_dir.display()
-                ),
+                format!("Cannot create {}: {e}", self.out_dir.display()),
             );
             return;
         }
@@ -1106,9 +1491,7 @@ impl SpringenApp {
             Ok(Err(e)) => {
                 self.job = None;
                 let hint = if e.contains("denied") || e.contains("os error 5") {
-                    format!(
-                        "{e}\nThat folder is not writable. Change the output folder in the inspector."
-                    )
+                    e.to_string()
                 } else {
                     e
                 };
@@ -1166,6 +1549,7 @@ impl eframe::App for SpringenApp {
         if self.screen == Screen::Workspace {
             self.track_edits(&ctx);
         }
+        self.confirm_dialog(&ctx);
         self.draw_toasts(&ctx);
         if let Some(job) = &self.job {
             let elapsed = ctx.input(|i| i.time) - job.started;
@@ -1175,6 +1559,7 @@ impl eframe::App for SpringenApp {
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.save_settings();
         if let (Some(gl), Some(r)) = (gl, self.renderer.take()) {
             if let Ok(r) = r.lock() {
                 r.destroy(gl);
@@ -1323,6 +1708,9 @@ impl SpringenApp {
 
     fn projects(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
+        let mut open_file = false;
+        let mut open_recent: Option<PathBuf> = None;
+        let mut import_map = false;
         for (kind, _) in STARTERS {
             let _ = self.starter_thumb(&ctx, kind);
         }
@@ -1343,7 +1731,15 @@ impl SpringenApp {
                             .color(theme::TEXT_PRIMARY),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ghost_button(ui, "New from starter").clicked() {
+                        if ghost_button(ui, "Open project").clicked() {
+                            open_file = true;
+                        }
+                        ui.add_space(6.0);
+                        if ghost_button(ui, "Import map").clicked() {
+                            import_map = true;
+                        }
+                        ui.add_space(6.0);
+                        if ghost_button(ui, "Continue").clicked() {
                             self.screen = Screen::Workspace;
                         }
                     });
@@ -1356,6 +1752,46 @@ impl SpringenApp {
                     .inner_margin(egui::Margin::same(20)),
             )
             .show(root, |ui| {
+                if !self.recent.is_empty() {
+                    theme::micro_label(ui, "Recent");
+                    ui.add_space(6.0);
+                    let recent = self.recent.clone();
+                    for path in recent {
+                        let name = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        let row = ui.allocate_response(
+                            Vec2::new(ui.available_width().min(720.0), theme::ROW_H),
+                            Sense::click(),
+                        );
+                        let r = row.rect;
+                        if row.hovered() {
+                            ui.painter()
+                                .rect_filled(r, theme::R_CONTROL, theme::SURFACE_HOVER);
+                        }
+                        ui.painter().text(
+                            r.left_center() + Vec2::new(8.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            &name,
+                            theme::font(FontRole::Ui, 13.0),
+                            theme::TEXT_PRIMARY,
+                        );
+                        ui.painter().text(
+                            r.right_center() - Vec2::new(8.0, 0.0),
+                            egui::Align2::RIGHT_CENTER,
+                            path.parent()
+                                .map(|d| d.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                            theme::font(FontRole::Mono, 11.0),
+                            theme::TEXT_DATA,
+                        );
+                        if row.clicked() {
+                            open_recent = Some(path.clone());
+                        }
+                    }
+                    ui.add_space(16.0);
+                }
                 theme::micro_label(ui, "Starters");
                 ui.add_space(6.0);
                 let mut chosen: Option<&str> = None;
@@ -1439,9 +1875,23 @@ impl SpringenApp {
                     self.mat_thumbs.clear();
                     self.repropose_spots();
                     self.fit_pending = true;
+                    self.saved_doc = String::new();
+                    self.project_path = None;
                     self.screen = Screen::Workspace;
                 }
             });
+        if open_file {
+            self.open_project(&ctx);
+            if self.project_path.is_some() {
+                self.screen = Screen::Workspace;
+            }
+        }
+        if let Some(path) = open_recent {
+            self.open_path(&ctx, path);
+        }
+        if import_map {
+            self.import_map(&ctx);
+        }
     }
 
     /* ---------------------------------------------------------- workspace */
@@ -1462,6 +1912,9 @@ impl SpringenApp {
         let mut want_fit = false;
         let mut want_open = false;
         let mut want_save = false;
+        let mut want_home = false;
+        let mut want_save_as = false;
+        let mut want_import = false;
         let mut dirty = false;
         egui::Panel::top("toolbar")
             .exact_size(theme::TOOLBAR_H)
@@ -1490,6 +1943,48 @@ impl SpringenApp {
                     if ghost_button(ui, "Save").clicked() {
                         want_save = true;
                     }
+                    ui.add_space(6.0);
+                    if ghost_button(ui, "Save as").clicked() {
+                        want_save_as = true;
+                    }
+                    ui.add_space(6.0);
+                    if ghost_button(ui, "Import map").clicked() {
+                        want_import = true;
+                    }
+                    ui.add_space(6.0);
+                    if ghost_button(ui, "Home").clicked() {
+                        want_home = true;
+                    }
+
+                    ui.add_space(12.0);
+                    toolbar_rule(ui);
+                    ui.add_space(12.0);
+                    egui::containers::menu::MenuButton::from_button(
+                        egui::Button::new(
+                            RichText::new("Panels")
+                                .font(theme::font(FontRole::Ui, 12.0))
+                                .color(theme::TEXT_SECONDARY),
+                        )
+                        .frame(false),
+                    )
+                    .ui(ui, |ui| {
+                        ui.set_min_width(170.0);
+                        for pane in Pane::ALL {
+                            let mut on = self.layout.is_open(pane);
+                            if ui.checkbox(&mut on, pane.title()).clicked() {
+                                self.layout.set_open(pane, on);
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("All to right").clicked() {
+                            for pane in Pane::ALL {
+                                self.layout.move_to(pane, Dock::Right);
+                            }
+                        }
+                        if ui.button("Reset layout").clicked() {
+                            self.layout = Layout::stock();
+                        }
+                    });
 
                     ui.add_space(12.0);
                     toolbar_rule(ui);
@@ -1546,18 +2041,10 @@ impl SpringenApp {
                             self.mode = mode;
                         }
                     }
-                    // The view modes drive the 3D viewport and the graph
-                    // canvas's map panel alike — it is the same painting, so
-                    // it takes the same switch.
                     if self.mode == CanvasMode::Terrain || self.graph_map {
                         ui.add_space(10.0);
                         toolbar_rule(ui);
                         ui.add_space(10.0);
-                        for m in ViewMode::ALL {
-                            if segmented(ui, m.label(), self.view_mode == m).clicked() {
-                                self.view_mode = m;
-                            }
-                        }
                     }
                     if self.mode == CanvasMode::Graph {
                         ui.add_space(10.0);
@@ -1647,10 +2134,26 @@ impl SpringenApp {
             )
             .show(root, |ui| {
                 let mut add: Option<&'static str> = None;
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.palette_filter)
+                        .hint_text("Filter")
+                        .desired_width(f32::INFINITY),
+                );
+                ui.add_space(6.0);
+                let needle = self.palette_filter.trim().to_ascii_lowercase();
+                let shows = |spec: &springen_core::graph::NodeSpec| {
+                    needle.is_empty()
+                        || spec.label.to_ascii_lowercase().contains(&needle)
+                        || spec.type_name.contains(&needle)
+                        || spec.cat.to_ascii_lowercase().contains(&needle)
+                };
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for cat in registry().categories() {
+                        if !registry().all().any(|s| s.cat == cat && shows(s)) {
+                            continue;
+                        }
                         theme::micro_label(ui, cat);
-                        for spec in registry().all().filter(|s| s.cat == cat) {
+                        for spec in registry().all().filter(|s| s.cat == cat && shows(s)) {
                             let (rect, resp) = ui.allocate_exact_size(
                                 Vec2::new(ui.available_width(), theme::ROW_H),
                                 Sense::click(),
@@ -1696,45 +2199,8 @@ impl SpringenApp {
                 }
             });
 
-        /* inspector */
-        egui::Panel::right("inspector")
-            .exact_size(theme::INSPECTOR_W)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::SURFACE_PANEL)
-                    .inner_margin(egui::Margin::same(theme::PANEL_PAD as i8))
-                    .stroke(Stroke::new(1.0, theme::BORDER_HAIRLINE)),
-            )
-            .show(root, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.inspector_project(ui);
-                    ui.add_space(10.0);
-                    dirty |= self.inspector_node(ui);
-                    ui.add_space(10.0);
-                    if self.mode == CanvasMode::Terrain {
-                        self.inspector_viewport(ui);
-                        ui.add_space(10.0);
-                    }
-                    // Above the manifest: the manifest is reference, this is
-                    // a reading you watch while you edit.
-                    self.inspector_flatness(ui);
-                    ui.add_space(10.0);
-                    self.inspector_manifest(ui, &d);
-                    ui.add_space(10.0);
-                    // Metal before materials: it is the interactive one, and
-                    // it is what you are looking at in the Metal view.
-                    dirty |= self.inspector_metal(ui);
-                    ui.add_space(10.0);
-                    // Next to metal: both are the layout the symmetry decides,
-                    // and both are edited on the terrain rather than here.
-                    dirty |= self.inspector_startboxes(ui);
-                    ui.add_space(10.0);
-                    self.inspector_materials(ui);
-                    ui.add_space(10.0);
-                    self.inspector_environment(ui);
-                });
-            });
+        /* panes */
+        self.rails(root, &d, &mut dirty);
 
         /* canvas */
         egui::CentralPanel::no_frame()
@@ -1787,10 +2253,9 @@ impl SpringenApp {
                         Some(renderer) => {
                             let camera = self.camera;
                             let range = (self.project.max_height - self.project.min_height) as f32;
-                            let sea = water_level_t(
-                                self.project.min_height,
-                                self.project.max_height,
-                            ) as f32;
+                            let sea =
+                                water_level_t(self.project.min_height, self.project.max_height)
+                                    as f32;
                             let aspect = rect.width() / rect.height().max(1.0);
                             // The sun and water mapinfo declares, so the light
                             // here is the light the engine will use.
@@ -1804,24 +2269,22 @@ impl SpringenApp {
                             ];
                             let cb = egui::PaintCallback {
                                 rect,
-                                callback: std::sync::Arc::new(
-                                    eframe::egui_glow::CallbackFn::new(
-                                        move |_info, painter| {
-                                            if let Ok(r) = renderer.lock() {
-                                                r.paint(
-                                                    painter.gl(),
-                                                    &camera,
-                                                    aspect,
-                                                    world,
-                                                    range,
-                                                    sea,
-                                                    sun,
-                                                    water,
-                                                );
-                                            }
-                                        },
-                                    ),
-                                ),
+                                callback: std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(
+                                    move |_info, painter| {
+                                        if let Ok(r) = renderer.lock() {
+                                            r.paint(
+                                                painter.gl(),
+                                                &camera,
+                                                aspect,
+                                                world,
+                                                range,
+                                                sea,
+                                                sun,
+                                                water,
+                                            );
+                                        }
+                                    },
+                                )),
                             };
                             ui.painter().add(cb);
                             self.draw_overlays(ui, rect, &d);
@@ -1831,7 +2294,7 @@ impl SpringenApp {
                             ui.painter().text(
                                 rect.center(),
                                 egui::Align2::CENTER_CENTER,
-                                "No OpenGL context, so the 3D viewport is unavailable.\nThe graph and baking are unaffected.",
+                                "No OpenGL context",
                                 theme::font(FontRole::Ui, 13.0),
                                 theme::TEXT_TERTIARY,
                             );
@@ -1848,6 +2311,15 @@ impl SpringenApp {
         }
         if want_save {
             self.save_project(ctx, false);
+        }
+        if want_save_as {
+            self.save_project(ctx, true);
+        }
+        if want_import {
+            self.import_map(ctx);
+        }
+        if want_home {
+            self.go_home(ctx);
         }
         if want_bake {
             self.start_bake(ctx);
@@ -1888,24 +2360,11 @@ impl SpringenApp {
             } else {
                 "Paint strokes"
             };
-            if ui
-                .selectable_label(self.brush.active, label)
-                .on_hover_text(
-                    "While this is on, dragging in the 3D view lays strokes instead of orbiting the camera.",
-                )
-                .clicked()
-            {
+            if ui.selectable_label(self.brush.active, label).clicked() {
                 self.brush.active = !self.brush.active;
             }
         });
         if !self.brush.active {
-            ui.label(
-                RichText::new(
-                    "Strokes are recorded in elmos, so a hand edit is the same shape at preview resolution and at bake resolution.",
-                )
-                .font(theme::font(FontRole::Ui, 11.0))
-                .color(theme::TEXT_TERTIARY),
-            );
             return;
         }
         ui.horizontal(|ui| {
@@ -1976,15 +2435,6 @@ impl SpringenApp {
                 );
             });
         });
-        ui.label(
-            RichText::new(match self.brush.mode {
-                StrokeMode::Raise => "Relative: survives a change further up the graph.",
-                StrokeMode::Smooth => "Relative: pulls toward the surrounding ground.",
-                StrokeMode::Level => "Absolute: levels to the height the ground had when you drew it, and goes stale if that ground moves.",
-            })
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
     }
 
     /// The project's start boxes, or the ones its symmetry implies.
@@ -2024,15 +2474,12 @@ impl SpringenApp {
                 springen_core::zk::symmetry_images(before.0, before.1, &self.project.mex_sym, w, h);
             let moved =
                 springen_core::zk::symmetry_images(after.0, after.1, &self.project.mex_sym, w, h);
-            for (was, now) in images.iter().zip(moved.iter()) {
-                // Whichever box that image belonged to.
-                let Some(j) = (0..areas.len()).filter(|j| *j != i).min_by(|a, b| {
-                    let da = dist2(areas[*a].centre(), *was);
-                    let db = dist2(areas[*b].centre(), *was);
-                    da.partial_cmp(&db).unwrap()
-                }) else {
-                    continue;
-                };
+            // Matched on where each image *was*, and claimed once, so no box
+            // is moved twice while another is left behind.
+            let centres: Vec<(f64, f64)> = areas.iter().map(|a| a.centre()).collect();
+            let pick = springen_core::zk::assign_images(&centres, i, &images);
+            for (now, which) in moved.iter().zip(pick) {
+                let Some(j) = which else { continue };
                 let c = areas[j].centre();
                 areas[j].translate(now.0 - c.0, now.1 - c.1, w, h);
             }
@@ -2056,6 +2503,7 @@ impl SpringenApp {
         }
         if response.drag_stopped() {
             self.box_drag = None;
+            self.box_corner = None;
         }
         if response.drag_started() || response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
@@ -2065,10 +2513,33 @@ impl SpringenApp {
                         x >= x0 && x <= x1 && z >= z0 && z <= z1
                     })
                 });
-                if hit.is_some() {
+                // A corner handle wins over the body it belongs to, so a
+                // grab near the edge resizes rather than slides.
+                let far = f64::from(d.elmos_x.max(d.elmos_y)) as f32 * 8.0;
+                let mut corner = None;
+                if let Some(sel) = self.selected_box.filter(|s| *s < areas.len()) {
+                    for k in 0..4 {
+                        let (cx, cz) = corner_of(&areas[sel], k);
+                        let world = self.ground_point(cx, cz, d);
+                        if let Some(p) = self.camera.project(world, rect, far) {
+                            if (p - pos).length() < 12.0 {
+                                corner = Some((sel, k));
+                                break;
+                            }
+                        }
+                    }
+                }
+                if let Some((sel, k)) = corner {
+                    self.selected_box = Some(sel);
+                    if response.drag_started() {
+                        self.box_drag = Some(sel);
+                        self.box_corner = Some(k);
+                    }
+                } else if hit.is_some() {
                     self.selected_box = hit;
                     if response.drag_started() {
                         self.box_drag = hit;
+                        self.box_corner = None;
                     }
                 } else if response.clicked() {
                     self.selected_box = None;
@@ -2083,12 +2554,34 @@ impl SpringenApp {
             return true;
         }
         let far = f64::from(d.elmos_x.max(d.elmos_y)) as f32 * 8.0;
-        let c = areas[i].centre();
-        let at = self.ground_point(c.0, c.1, d);
+        let anchor = match self.box_corner {
+            Some(k) => corner_of(&areas[i], k),
+            None => areas[i].centre(),
+        };
+        let at = self.ground_point(anchor.0, anchor.1, d);
         let Some((dx, dz)) = self.camera.screen_to_ground(at, delta, rect, far) else {
             return true;
         };
-        self.drag_start_box(i, f64::from(dx), f64::from(dz), d);
+        match self.box_corner {
+            // Dragging a corner moves that corner only, so the opposite one
+            // stays put and the box grows from where you grabbed it.
+            Some(k) => {
+                let (w, h) = (f64::from(d.elmos_x), f64::from(d.elmos_y));
+                let (x0, z0, x1, z1) = areas[i].bounds();
+                let (nx, nz) = (anchor.0 + f64::from(dx), anchor.1 + f64::from(dz));
+                let (fx, fz) = (
+                    if k & 1 == 0 { x1 } else { x0 },
+                    if k & 2 == 0 { z1 } else { z0 },
+                );
+                let mut next = areas.clone();
+                next[i].set_bounds(nx, nz, fx, fz, w, h);
+                if self.mirror_edits {
+                    reflow_images(&mut next, i, &self.project.mex_sym, w, h);
+                }
+                self.project.start_boxes = Some(next);
+            }
+            None => self.drag_start_box(i, f64::from(dx), f64::from(dz), d),
+        }
         true
     }
 
@@ -2475,6 +2968,27 @@ impl SpringenApp {
                         );
                     }
                 }
+                // Corner handles on the selected box, so it can be resized
+                // where it is rather than only by typing bounds.
+                if selected {
+                    for k in 0..4u8 {
+                        let (cx, cz) = corner_of(a, k);
+                        if let Some(p) = self.camera.project(
+                            [cx as f32, height_at(cx, cz), cz as f32],
+                            rect,
+                            far,
+                        ) {
+                            let r = egui::Rect::from_center_size(p, Vec2::splat(8.0));
+                            painter.rect_filled(r, 1.0, theme::SURFACE_PANEL);
+                            painter.rect_stroke(
+                                r,
+                                1.0,
+                                Stroke::new(1.5, theme::ACCENT),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+                }
                 // The start point, which is where a commander actually lands.
                 if let Some(b) = boxes.get(i) {
                     if let Some((sx, sz)) = b.start_points.first() {
@@ -2614,14 +3128,208 @@ impl SpringenApp {
 
     /* ---------------------------------------------------------- inspector */
 
+    /* ------------------------------------------------------------- panes */
+
+    /// Draw one pane's contents. Every pane is one arm; nothing here knows
+    /// where the pane is sitting.
+    fn pane_body(&mut self, pane: Pane, ui: &mut egui::Ui, d: &springen_core::Derived) -> bool {
+        match pane {
+            Pane::Project => self.inspector_project(ui),
+            Pane::Node => self.inspector_node(ui),
+            Pane::Viewport => self.inspector_viewport(ui),
+            Pane::Measure => {
+                self.inspector_flatness(ui);
+                false
+            }
+            Pane::Manifest => {
+                self.inspector_manifest(ui, d);
+                false
+            }
+            Pane::Metal => self.inspector_metal(ui),
+            Pane::StartBoxes => self.inspector_startboxes(ui),
+            Pane::Materials => self.inspector_materials(ui),
+            Pane::Environment => self.inspector_environment(ui),
+        }
+    }
+
+    /// A pane's header: its name, and the controls that move it.
+    ///
+    /// Clicking the name collapses the pane. The buttons on the right send it
+    /// to the other rail, set it loose, or close it; the arrows move it within
+    /// its own rail. All of it is explicit rather than drag-and-drop, because
+    /// a layout you rearranged by accident is worse than one that takes two
+    /// clicks.
+    fn pane_header(&mut self, ui: &mut egui::Ui, pane: Pane, docked: bool) {
+        let st = self.layout.get(pane);
+        ui.horizontal(|ui| {
+            ui.set_min_height(theme::ROW_H);
+            if docked {
+                let chevron = if st.collapsed {
+                    Icon::ChevronRight
+                } else {
+                    Icon::ChevronDown
+                };
+                if icon_button(ui, chevron).clicked() {
+                    self.layout.set_collapsed(pane, !st.collapsed);
+                }
+            }
+            let title = ui.add(
+                egui::Label::new(
+                    RichText::new(pane.title())
+                        .font(theme::font(FontRole::Ui, 12.0))
+                        .color(theme::TEXT_PRIMARY),
+                )
+                .sense(Sense::click()),
+            );
+            if title.clicked() && docked {
+                self.layout.set_collapsed(pane, !st.collapsed);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button(ui, Icon::Close).clicked() {
+                    self.layout.set_open(pane, false);
+                }
+                match st.dock {
+                    Dock::Float => {
+                        if icon_button(ui, Icon::DockLeft).clicked() {
+                            self.layout.move_to(pane, Dock::Left);
+                        }
+                        if icon_button(ui, Icon::DockRight).clicked() {
+                            self.layout.move_to(pane, Dock::Right);
+                        }
+                    }
+                    _ => {
+                        if icon_button(ui, Icon::Float).clicked() {
+                            self.layout.move_to(pane, Dock::Float);
+                        }
+                        let (other, mark) = if st.dock == Dock::Left {
+                            (Dock::Right, Icon::DockRight)
+                        } else {
+                            (Dock::Left, Icon::DockLeft)
+                        };
+                        if icon_button(ui, mark).clicked() {
+                            self.layout.move_to(pane, other);
+                        }
+                        if icon_button(ui, Icon::Down).clicked() {
+                            self.layout.shift(pane, 1);
+                        }
+                        if icon_button(ui, Icon::Up).clicked() {
+                            self.layout.shift(pane, -1);
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    /// The two rails and every floating pane.
+    fn rails(&mut self, root: &mut egui::Ui, d: &springen_core::Derived, dirty: &mut bool) {
+        for (dock, id) in [(Dock::Left, "rail-left"), (Dock::Right, "rail-right")] {
+            let panes = self.layout.rail(dock);
+            if panes.is_empty() {
+                continue;
+            }
+            let width = if dock == Dock::Left {
+                self.layout.left_w
+            } else {
+                self.layout.right_w
+            };
+            let frame = egui::Frame::new()
+                .fill(theme::SURFACE_PANEL)
+                .inner_margin(egui::Margin::same(theme::PANEL_PAD as i8))
+                .stroke(Stroke::new(1.0, theme::BORDER_HAIRLINE));
+            let build = |ui: &mut egui::Ui, me: &mut Self, dirty: &mut bool| {
+                egui::ScrollArea::vertical().id_salt(id).show(ui, |ui| {
+                    for (i, pane) in panes.iter().enumerate() {
+                        if i > 0 {
+                            ui.add_space(6.0);
+                            let (r, _) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), 1.0),
+                                Sense::hover(),
+                            );
+                            ui.painter().rect_filled(r, 0.0, theme::BORDER_HAIRLINE);
+                            ui.add_space(6.0);
+                        }
+                        me.pane_header(ui, *pane, true);
+                        if !me.layout.get(*pane).collapsed {
+                            *dirty |= me.pane_body(*pane, ui, d);
+                        }
+                    }
+                });
+            };
+            let resp = if dock == Dock::Left {
+                egui::Panel::left(id)
+                    .default_size(width)
+                    .min_size(180.0)
+                    .max_size(640.0)
+                    .resizable(true)
+                    .frame(frame)
+                    .show(root, |ui| build(ui, self, dirty))
+            } else {
+                egui::Panel::right(id)
+                    .default_size(width)
+                    .min_size(180.0)
+                    .max_size(640.0)
+                    .resizable(true)
+                    .frame(frame)
+                    .show(root, |ui| build(ui, self, dirty))
+            };
+            // Remember the width the user dragged to.
+            let w = resp.response.rect.width();
+            if dock == Dock::Left {
+                self.layout.left_w = w;
+            } else {
+                self.layout.right_w = w;
+            }
+        }
+
+        let ctx = root.ctx().clone();
+        for pane in self.layout.floating() {
+            let st = self.layout.get(pane);
+            let mut open = true;
+            let area = egui::Window::new(pane.title())
+                .id(egui::Id::new(("float", pane.key())))
+                .open(&mut open)
+                .title_bar(false)
+                .resizable(true)
+                .default_pos(st.pos)
+                .default_size(st.size)
+                // Flat, square, hairline-separated. A floating pane is still a
+                // panel, and the design system reserves shadow and radius for
+                // popovers and dialogs — which is also the difference between
+                // a tool window and a card.
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::SURFACE_PANEL)
+                        .inner_margin(egui::Margin::same(theme::PANEL_PAD as i8))
+                        .stroke(Stroke::new(1.0, theme::BORDER_PANEL))
+                        .corner_radius(egui::CornerRadius::ZERO)
+                        .shadow(egui::epaint::Shadow::NONE),
+                )
+                .show(&ctx, |ui| {
+                    self.pane_header(ui, pane, false);
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt(pane.key())
+                        .show(ui, |ui| {
+                            *dirty |= self.pane_body(pane, ui, d);
+                        });
+                });
+            if !open {
+                self.layout.set_open(pane, false);
+            }
+            if let Some(a) = area {
+                let r = a.response.rect;
+                self.layout.set_float_rect(pane, r.min, r.size());
+            }
+        }
+    }
+
     /// Name, version, author and destination.
     ///
-    /// The name and version are what Zero-K identifies the map by, and it
-    /// refuses an upload when the name already exists -- so both have to be
-    /// editable, and the resulting file name has to be visible before you bake
-    /// rather than discovered afterwards.
+    /// The name and version are what Zero-K identifies a map by, so both have
+    /// to be editable and the resulting file name has to be visible before a
+    /// bake rather than discovered afterwards.
     fn inspector_project(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Map");
         let mut changed = false;
         let mut text_row = |ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str| {
             ui.horizontal(|ui| {
@@ -2676,9 +3384,6 @@ impl SpringenApp {
                             .max_decimals(0)
                             .suffix(" elmos"),
                     )
-                    .on_hover_text(
-                        "Total height from the lowest point to the highest. Lower it to flatten the whole map: peaks come down and hollows come up together.",
-                    )
                     .changed()
                 {
                     scale_changed = true;
@@ -2701,9 +3406,6 @@ impl SpringenApp {
                             .speed(0.25)
                             .max_decimals(1)
                             .suffix("%"),
-                    )
-                    .on_hover_text(
-                        "How much of the vertical range sits below the waterline. Height 0 elmos is the waterline, so this is what sets minHeight and maxHeight.",
                     )
                     .changed()
                 {
@@ -2739,9 +3441,6 @@ impl SpringenApp {
                             .speed(1.0)
                             .max_decimals(0)
                             .suffix(" elmos"),
-                    )
-                    .on_hover_text(
-                        "Deepest the water is allowed to get, measured down from the waterline. The sea floor is lifted toward the surface and the coastline does not move, so bots can ford what ships used to own. 0 leaves the terrain alone.",
                     )
                     .changed()
                 {
@@ -2785,19 +3484,8 @@ impl SpringenApp {
                 .color(theme::TEXT_DATA),
         );
         if target.exists() {
-            issue_row(
-                ui,
-                Level::Warn,
-                "That file exists and baking will replace it. Change the version to keep both.",
-            );
+            issue_row(ui, Level::Warn, "File exists — baking replaces it");
         }
-        ui.label(
-            RichText::new(
-                "Zero-K identifies a map by this name and refuses an upload when it already exists. Change the name or the version to publish again.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
         // The one graph mistake that bakes successfully and ships a map that
         // is a level plane from corner to corner.
         if self.graph.find_wired_terminal("height").is_none() {
@@ -2805,9 +3493,9 @@ impl SpringenApp {
                 ui,
                 Level::Error,
                 if self.graph.find_terminal("height").is_some() {
-                    "Nothing is connected to the Heightmap out node, so the map would be perfectly flat. The bake will refuse it."
+                    "Heightmap out is unconnected"
                 } else {
-                    "The graph has no Heightmap out node, so there is nothing to bake."
+                    "No Heightmap out node"
                 },
             );
         }
@@ -2897,7 +3585,6 @@ impl SpringenApp {
     /// Sun, sky and water. The viewport reads the same numbers, so what you
     /// light the terrain with here is what the engine lights it with.
     fn inspector_environment(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Environment");
         let mut changed = false;
         ui.horizontal(|ui| {
             ui.set_min_height(theme::ROW_H);
@@ -2978,13 +3665,6 @@ impl SpringenApp {
             }
             self.terrain_sig.clear();
         }
-        ui.label(
-            RichText::new(
-                "Written into mapinfo's atmosphere, lighting and water blocks. The viewport lights the terrain with the same sun. A skyBox cubemap is not generated yet.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
         changed
     }
 
@@ -2995,7 +3675,7 @@ impl SpringenApp {
     /// so what a channel *means* is whatever the graph wired into it -- the
     /// starters use R for steep rock, G for slope and B for height.
     fn inspector_materials(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Detail materials");
+        theme::micro_label(ui, "Channels");
         let mut changed = false;
         let ctx = ui.ctx().clone();
         let keys: Vec<&'static str> = springen_core::material::keys();
@@ -3068,15 +3748,12 @@ impl SpringenApp {
 
         if let Some(strip) = self.ground_strip(&ctx) {
             ui.add_space(4.0);
-            theme::micro_label(ui, "Underfoot, at engine scale");
+            theme::micro_label(ui, "Underfoot");
             let w = ui.available_width();
             ui.add(
                 egui::Image::new(&strip)
                     .fit_to_exact_size(Vec2::new(w, w / 4.0))
                     .corner_radius(3.0),
-            )
-            .on_hover_text(
-                "Each splat channel over 120 elmos of ground, with the detail tile added the way the engine adds it. The Diffuse view cannot show this: the tile repeats every 50 elmos, so a map-wide pixel averages it away.",
             );
             ui.add_space(4.0);
         }
@@ -3104,24 +3781,11 @@ impl SpringenApp {
                 );
             });
         });
-        ui.label(
-            RichText::new(
-                "Channels are the RGBA of the splat distribution your graph paints. The blend colours the baked ground texture; the detail normals ride on top of it either way.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
         changed
     }
 
     fn inspector_node(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Node");
         let Some(id) = self.view.selected.clone() else {
-            ui.label(
-                RichText::new("Select a node to edit its parameters.")
-                    .font(theme::font(FontRole::Ui, 12.0))
-                    .color(theme::TEXT_TERTIARY),
-            );
             return false;
         };
         let Some(node) = self.graph.node(&id) else {
@@ -3196,9 +3860,9 @@ impl SpringenApp {
                     let drift = springen_core::nodes::stroke_drift(&strokes, field, &ctx);
                     if drift > 24.0 {
                         ui.label(
-                            RichText::new(format!(
-                                "Levelling strokes are {drift:.0} elmos off the ground they were drawn on — something upstream has moved since. Re-draw them, or switch them to Raise, which never goes stale.",
-                            ))
+                            RichText::new(
+                                format!("Level strokes {drift:.0} elmos off their seat",),
+                            )
                             .font(theme::font(FontRole::Ui, 11.0))
                             .color(theme::WARN_500),
                         );
@@ -3239,11 +3903,6 @@ impl SpringenApp {
                 for i in 0..pts.len() {
                     ui.horizontal(|ui| {
                         ui.set_min_height(theme::ROW_H);
-                        ui.label(
-                            RichText::new(format!("{}", i + 1))
-                                .font(theme::font(FontRole::Mono, 11.0))
-                                .color(theme::TEXT_TERTIARY),
-                        );
                         let lim = Context::new(&self.project, 129);
                         for (k, max) in [(0usize, lim.elmos_x), (1, lim.elmos_y)] {
                             let mut v = pts[i][k];
@@ -3270,11 +3929,7 @@ impl SpringenApp {
                     edited = true;
                 }
                 if pts.len() < 2 {
-                    issue_row(
-                        ui,
-                        Level::Info,
-                        "A route needs two waypoints before it does anything. Add them here, then drag them across the terrain in the 3D view.",
-                    );
+                    issue_row(ui, Level::Info, "Needs two waypoints");
                 }
                 if edited {
                     if let Some(node) = self.graph.node_mut(&id) {
@@ -3382,20 +4037,22 @@ impl SpringenApp {
         }
         if params.iter().any(|p| p.ptype == PType::Elmos) {
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(
-                    "Every distance is authored in elmos, so changing working resolution never changes the shape of the terrain.",
-                )
-                .font(theme::font(FontRole::Ui, 11.0))
-                .color(theme::TEXT_TERTIARY),
-            );
         }
         changed
     }
 
     /// Controls that only mean anything while the 3D viewport is showing.
     fn inspector_viewport(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Viewport");
+        // The view switch lives with the view. It was the widest thing in the
+        // toolbar and the first casualty on a narrow window.
+        ui.horizontal_wrapped(|ui| {
+            for m in ViewMode::ALL {
+                if segmented(ui, m.label(), self.view_mode == m).clicked() {
+                    self.view_mode = m;
+                }
+            }
+        });
+        ui.add_space(6.0);
         let mut changed = false;
         ui.horizontal(|ui| {
             ui.set_min_height(theme::ROW_H);
@@ -3444,18 +4101,11 @@ impl SpringenApp {
                 }
             });
         });
-        ui.label(
-            RichText::new(
-                "Drag to orbit, wheel to zoom, shift or middle drag to pan. Slope and pathability are drawn against the climb limit.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
         changed
     }
 
     fn inspector_manifest(&mut self, ui: &mut egui::Ui, d: &springen_core::Derived) {
-        theme::micro_label(ui, "Spring layer manifest");
+        theme::micro_label(ui, "Layers");
         theme::stat_row(
             ui,
             "Heightmap",
@@ -3518,13 +4168,6 @@ impl SpringenApp {
             false,
         );
         ui.add_space(4.0);
-        ui.label(
-            RichText::new(
-                "mapx must divide by 128, so the size unit has to be even. The real quantum is 1024 elmos, not 512.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
     }
 
     /// How much of the map will hold a building, measured live.
@@ -3598,11 +4241,6 @@ impl SpringenApp {
         }
 
         let Some(f) = &self.flatness else {
-            ui.label(
-                RichText::new("Open the terrain view to measure.")
-                    .font(theme::font(FontRole::Ui, 11.0))
-                    .color(theme::TEXT_TERTIARY),
-            );
             return;
         };
         theme::stat_row(
@@ -3631,13 +4269,6 @@ impl SpringenApp {
             false,
         );
         theme::stat_row(ui, "Relief", &format!("{:.0} elmos", f.relief_elmos), false);
-        ui.label(
-            RichText::new(
-                "Grade limit raises the first number without flattening the map's shape. Raising the sea does not raise it at all — it only drowns the steep ground.",
-            )
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
 
         self.inspector_choke(ui);
     }
@@ -3672,14 +4303,12 @@ impl SpringenApp {
             return;
         };
         ui.add_space(6.0);
-        theme::micro_label(ui, "Corridor width, for tanks");
+        theme::micro_label(ui, "Corridor width");
         if c.bottleneck <= 0.0 {
             ui.label(
-                RichText::new(
-                    "No route from one side of the map to the other. The largest traversable region does not reach across.",
-                )
-                .font(theme::font(FontRole::Ui, 11.0))
-                .color(theme::TEXT_TERTIARY),
+                RichText::new("No route across")
+                    .font(theme::font(FontRole::Ui, 11.0))
+                    .color(theme::TEXT_TERTIARY),
             );
             return;
         }
@@ -3709,15 +4338,6 @@ impl SpringenApp {
             &format!("{:.0} elmos median, {:.0} p10", c.median, c.p10),
             false,
         );
-        ui.label(
-            RichText::new(if funnels {
-                "The best route across pinches to well under the typical corridor. Everything will be decided at that neck — the Pathability view rings it."
-            } else {
-                "The narrowest point of the widest route from one side of the map to the other. The Pathability view shades by corridor width and rings this point."
-            })
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(theme::TEXT_TERTIARY),
-        );
     }
 
     /// Start boxes: what they are, where they are, and how to put them back.
@@ -3725,15 +4345,10 @@ impl SpringenApp {
         let d = springen_core::derive(self.project.units_x, self.project.units_y);
         let (w, h) = (f64::from(d.elmos_x), f64::from(d.elmos_y));
         let mut changed = false;
-        theme::micro_label(ui, "Start boxes");
 
         ui.horizontal(|ui| {
             ui.set_min_height(theme::ROW_H);
-            if ui
-                .selectable_label(self.show_boxes, "Show in 3D")
-                .on_hover_text("Drag a box on the terrain to move it.")
-                .clicked()
-            {
+            if ui.selectable_label(self.show_boxes, "Show in 3D").clicked() {
                 self.show_boxes = !self.show_boxes;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3783,6 +4398,88 @@ impl SpringenApp {
         }
 
         if let Some(i) = self.selected_box.filter(|i| *i < areas.len()) {
+            let a = areas[i].clone();
+            let (x0, z0, x1, z1) = a.bounds();
+            ui.add_space(4.0);
+
+            // Exact bounds, because "somewhere around there" is not a spawn
+            // area — it decides who reaches the middle first.
+            let grid = springen_core::Zk::METAL_GRID;
+            let mut edited: Option<(f64, f64, f64, f64)> = None;
+            for (label, lo, hi, limit, horizontal) in
+                [("X", x0, x1, w, true), ("Z", z0, z1, h, false)]
+            {
+                ui.horizontal(|ui| {
+                    ui.set_min_height(theme::ROW_H);
+                    ui.label(
+                        RichText::new(label)
+                            .font(theme::font(FontRole::Ui, 12.0))
+                            .color(theme::TEXT_SECONDARY),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (mut a1, mut a0) = (hi, lo);
+                        let r1 = ui.add(
+                            egui::DragValue::new(&mut a1)
+                                .range(0.0..=limit)
+                                .speed(grid * 0.5)
+                                .max_decimals(0),
+                        );
+                        ui.label(
+                            RichText::new("to")
+                                .font(theme::font(FontRole::Ui, 11.0))
+                                .color(theme::TEXT_TERTIARY),
+                        );
+                        let r0 = ui.add(
+                            egui::DragValue::new(&mut a0)
+                                .range(0.0..=limit)
+                                .speed(grid * 0.5)
+                                .max_decimals(0),
+                        );
+                        if r0.changed() || r1.changed() {
+                            edited = Some(if horizontal {
+                                (a0, z0, a1, z1)
+                            } else {
+                                (x0, a0, x1, a1)
+                            });
+                        }
+                    });
+                });
+            }
+            if let Some((nx0, nz0, nx1, nz1)) = edited {
+                let mut next = areas.clone();
+                next[i].set_bounds(nx0, nz0, nx1, nz1, w, h);
+                if self.mirror_edits {
+                    reflow_images(&mut next, i, &self.project.mex_sym, w, h);
+                }
+                self.project.start_boxes = Some(next);
+                changed = true;
+            }
+
+            ui.horizontal(|ui| {
+                ui.set_min_height(theme::ROW_H);
+                ui.label(
+                    RichText::new("Shape")
+                        .font(theme::font(FontRole::Ui, 12.0))
+                        .color(theme::TEXT_SECONDARY),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let now = a.shape();
+                    for sh in springen_core::lua::Shape::ALL.iter().rev() {
+                        if segmented(ui, sh.label(), now == *sh).clicked() && now != *sh {
+                            let mut next = areas.clone();
+                            // Every box takes the shape: a layout where one
+                            // team has a wedge and the rest have rectangles is
+                            // not a symmetric map.
+                            for b in next.iter_mut() {
+                                b.set_shape(*sh, w, h);
+                            }
+                            self.project.start_boxes = Some(next);
+                            changed = true;
+                        }
+                    }
+                });
+            });
+
             ui.horizontal(|ui| {
                 ui.set_min_height(theme::ROW_H);
                 ui.label(
@@ -3791,15 +4488,20 @@ impl SpringenApp {
                         .color(theme::TEXT_SECONDARY),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Scaling every box together, because they are one layout
-                    // rather than a set of independent rectangles — shrinking
-                    // one team's base and not the others is not a thing anyone
-                    // wants to do by accident.
-                    for (label, k) in [("Bigger", 1.1), ("Smaller", 1.0 / 1.1)] {
+                    for (label, k, all) in [
+                        ("+", 1.1, false),
+                        ("\u{2212}", 1.0 / 1.1, false),
+                        ("+ all", 1.1, true),
+                        ("\u{2212} all", 1.0 / 1.1, true),
+                    ] {
                         if ghost_button(ui, label).clicked() {
                             let mut next = areas.clone();
-                            for a in next.iter_mut() {
-                                a.scale(k, w, h);
+                            if all {
+                                for b in next.iter_mut() {
+                                    b.scale(k, w, h);
+                                }
+                            } else {
+                                next[i].scale(k, w, h);
                             }
                             self.project.start_boxes = Some(next);
                             changed = true;
@@ -3807,27 +4509,35 @@ impl SpringenApp {
                     }
                 });
             });
-            let _ = i;
+
+            ui.horizontal(|ui| {
+                ui.set_min_height(theme::ROW_H);
+                if ghost_button(ui, "Duplicate").clicked() {
+                    let mut next = areas.clone();
+                    let mut copy = next[i].clone();
+                    copy.short = format!("{}{}", copy.short, next.len() + 1);
+                    copy.long = format!("{} {}", copy.long, next.len() + 1);
+                    copy.translate(w * 0.06, h * 0.06, w, h);
+                    next.push(copy);
+                    self.project.start_boxes = Some(next);
+                    self.selected_box = Some(areas.len());
+                    changed = true;
+                }
+                if areas.len() > 1 && ghost_button(ui, "Remove").clicked() {
+                    let mut next = areas.clone();
+                    next.remove(i);
+                    self.project.start_boxes = Some(next);
+                    self.selected_box = None;
+                    changed = true;
+                }
+            });
         }
 
-        ui.label(
-            RichText::new(if self.mirror_edits {
-                "Moving one box moves its symmetry images with it. The start point inside each box is chosen from the terrain at bake time, so it lands on buildable ground rather than the box's centre."
-            } else {
-                "Mirror edits is off, so a box moves alone — the map will not be fair."
-            })
-            .font(theme::font(FontRole::Ui, 11.0))
-            .color(if self.mirror_edits {
-                theme::TEXT_TERTIARY
-            } else {
-                theme::WARN_500
-            }),
-        );
         changed
     }
 
     fn inspector_metal(&mut self, ui: &mut egui::Ui) -> bool {
-        theme::micro_label(ui, "Metal spots");
+        theme::micro_label(ui, "Spots");
         let mut changed = false;
         ui.horizontal(|ui| {
             ui.set_min_height(theme::ROW_H);
@@ -3949,7 +4659,7 @@ impl SpringenApp {
                 ui,
                 Level::Warn,
                 &format!(
-                    "{} spots proposed (target {} — spacing too tight)",
+                    "{} of {} — spacing too tight",
                     self.spots.len(),
                     self.spot_count
                 ),
@@ -3977,7 +4687,7 @@ impl SpringenApp {
                     format!("{} is under water", b.spot_id)
                 } else {
                     format!(
-                        "{} sits on {:.0}° ground, over the {:.0}° limit",
+                        "{} on {:.0}° ground, limit {:.0}°",
                         b.spot_id, b.max_slope_deg, self.max_spot_slope
                     )
                 },
@@ -3999,11 +4709,7 @@ impl SpringenApp {
         }
         if v.issues.is_empty() && sym.symmetric && unbuildable.is_empty() && !self.spots.is_empty()
         {
-            issue_row(
-                ui,
-                Level::Ok,
-                "Every spot is above the minimum, clear of merge distance, symmetric and on ground a mex can be built on.",
-            );
+            issue_row(ui, Level::Ok, "All checks pass");
         }
 
         ui.add_space(8.0);
@@ -4070,13 +4776,7 @@ impl SpringenApp {
 
         ui.horizontal(|ui| {
             ui.set_min_height(theme::ROW_H);
-            if ui
-                .checkbox(&mut self.mirror_edits, "")
-                .on_hover_text(
-                    "Move and value a spot's symmetry images with it. Off edits one spot alone, which breaks fairness deliberately.",
-                )
-                .changed()
-            {
+            if ui.checkbox(&mut self.mirror_edits, "").changed() {
                 changed = true;
             }
             ui.label(
@@ -4102,13 +4802,6 @@ impl SpringenApp {
         }
 
         let Some(i) = self.selected_spot.filter(|i| *i < self.spots.len()) else {
-            ui.label(
-                RichText::new(
-                    "In the Metal view, click a spot to move it and its mirror follows. Ctrl-click open ground to place a new one there.",
-                )
-                .font(theme::font(FontRole::Ui, 11.0))
-                .color(theme::TEXT_TERTIARY),
-            );
             return changed;
         };
 
@@ -4141,13 +4834,13 @@ impl SpringenApp {
         if group.len() == 1 && self.project.mex_sym != "none" {
             let full = zk::group_size(spot.x, spot.z, &self.project.mex_sym, w, h);
             let why = if spot.single {
-                "It is marked as deliberately unmirrored."
+                "Marked unmirrored"
             } else if full == 1 {
-                "It sits on the symmetry axis, so it is its own mirror — one spot is the fair answer here."
+                "On the symmetry axis"
             } else if !self.mirror_edits {
-                "Mirror edits is off, so it was placed alone."
+                "Mirror edits off"
             } else {
-                "Its images are missing. Ctrl-click to place a new one off the axis, or re-propose."
+                "Images missing"
             };
             ui.label(
                 RichText::new(format!("Alone. {why}"))
@@ -4227,7 +4920,7 @@ impl SpringenApp {
                 ui,
                 Level::Error,
                 &format!(
-                    "Zero-K discards spots at or below {} metal without saying so.",
+                    "Below {} metal is discarded",
                     springen_core::Zk::MINIMUM_MEX_INCOME
                 ),
             );
