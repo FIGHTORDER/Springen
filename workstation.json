@@ -1,0 +1,100 @@
+{
+  "layout": {
+    "leftWidth": 344.59375,
+    "panes": {
+      "environment": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 7,
+        "w": 344.0,
+        "x": 622.0,
+        "y": 362.0
+      },
+      "manifest": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 8,
+        "w": 344.0,
+        "x": 668.0,
+        "y": 400.0
+      },
+      "materials": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 6,
+        "w": 344.0,
+        "x": 576.0,
+        "y": 324.0
+      },
+      "measure": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 3,
+        "w": 344.0,
+        "x": 438.0,
+        "y": 210.0
+      },
+      "metal": {
+        "collapsed": false,
+        "dock": "float",
+        "h": 200.8125,
+        "open": true,
+        "order": 0,
+        "w": 380.8125,
+        "x": 226.40625,
+        "y": 54.40625
+      },
+      "node": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 1,
+        "w": 344.0,
+        "x": 346.0,
+        "y": 134.0
+      },
+      "project": {
+        "collapsed": false,
+        "dock": "right",
+        "h": 340.0,
+        "open": true,
+        "order": 0,
+        "w": 344.0,
+        "x": 300.0,
+        "y": 96.0
+      },
+      "startboxes": {
+        "collapsed": false,
+        "dock": "float",
+        "h": 152.8125,
+        "open": true,
+        "order": 5,
+        "w": 349.21875,
+        "x": 1340.0,
+        "y": 56.8125
+      },
+      "viewport": {
+        "collapsed": false,
+        "dock": "float",
+        "h": 161.21875,
+        "open": true,
+        "order": 2,
+        "w": 288.0,
+        "x": 613.59375,
+        "y": 54.40625
+      }
+    },
+    "rightWidth": 343.40625
+  },
+  "outDir": "C:\\Users\\youyx\\Documents\\Springen",
+  "recent": []
+}
