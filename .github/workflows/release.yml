@@ -92,6 +92,27 @@ jobs:
           The .sha256 beside the zip is the hash to check it against.
           "@
 
+          # Refuse to replace an asset that is already published.
+          #
+          # The upload runs with --clobber, the filename carries the version,
+          # and the version is bumped by hand - so any push that forgets the
+          # bump silently replaced the bytes behind a name somebody else pins.
+          # Shiro pins this URL together with its SHA-256 and checks it at
+          # install time and again in its own CI, so the first symptom is every
+          # shipped copy of Shiro failing to install this app.
+          #
+          # Re-publishing the same version on purpose means deleting the asset
+          # first; that is a deliberate act and this is the prompt for it.
+          $published = gh release view dev --json assets --jq '.assets[].name' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $published) {
+            foreach ($a in $assets) {
+              $name = Split-Path $a -Leaf
+              if ($published -contains $name) {
+                throw "$name is already on the dev release. Bump SPRINGEN_VERSION, or delete that asset to republish."
+              }
+            }
+          }
+
           gh release view dev *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release edit dev --title "Springen - development build" --notes $notes --prerelease
